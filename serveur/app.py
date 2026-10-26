@@ -44,7 +44,8 @@ def connexion():
     if not BASE.exists():
         raise HTTPException(503, "Base de données absente : lancez d'abord le collecteur "
                                  "(uv run collecteur/collect.py).")
-    cx = sqlite3.connect(f"file:{BASE}?mode=ro", uri=True, check_same_thread=False)
+    # as_uri() donne file:///C:/... : la seule forme d'URI correcte sous Windows (pas de « \\ »)
+    cx = sqlite3.connect(Path(BASE).resolve().as_uri() + "?mode=ro", uri=True, check_same_thread=False)
     cx.row_factory = sqlite3.Row
     try:
         yield cx
@@ -142,6 +143,14 @@ def collectes(limite: int = Query(5, ge=1, le=50), cx: sqlite3.Connection = Depe
             "SELECT source, statut, nb, message FROM collectes_sources WHERE collecte_id = ?", (c["id"],))]
         sortie.append({**dict(c), "hors_ligne": bool(c["hors_ligne"]), "sources": sources})
     return sortie
+
+
+# ---------------------------------------------------------------------------
+# Administration (page /admin et routes /api/admin/*, protégées par mot de passe)
+# ---------------------------------------------------------------------------
+from serveur.admin import routeur as routeur_admin  # noqa: E402
+
+app.include_router(routeur_admin)
 
 
 # ---------------------------------------------------------------------------

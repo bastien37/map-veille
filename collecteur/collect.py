@@ -5,7 +5,6 @@ Collecteur : sources -> collecte -> tri -> stockage (chaîne de l'information, p
 
 Types de sources (collecteur/sources.json) :
     rss        flux RSS 2.0 ou Atom d'un média
-    gdelt      API GDELT DOC 2.0 (presse mondiale, requêtes en français, sans clé)
     gdacs      API GDACS (alertes catastrophes ONU / Commission européenne, sans clé)
     reliefweb  API ReliefWeb v2 (rapports humanitaires OCHA, appname approuvé requis)
 
@@ -63,7 +62,7 @@ def nettoyer_html(texte: str) -> str:
 
 
 def lire_date(txt):
-    """RFC 822 (RSS), ISO 8601 (Atom, GDACS, ReliefWeb) ou AAAAMMJJTHHMMSSZ (GDELT)."""
+    """RFC 822 (RSS), ISO 8601 (Atom, GDACS, ReliefWeb) ou ISO compact AAAAMMJJTHHMMSSZ."""
     if not txt:
         return None
     txt = str(txt).strip()
@@ -189,40 +188,6 @@ def source_rss(s, hors_ligne):
     return lire_rss(charger(s, hors_ligne, s["url"]), s["nom"])
 
 
-def source_gdelt(s, hors_ligne, domaines):
-    """GDELT DOC 2.0 : https://api.gdeltproject.org/api/v2/doc/doc
-    Limite officielle : 1 requête toutes les 5 secondes. En pratique GDELT renvoie souvent 429 :
-    pause de 10 s entre les thèmes, jusqu'à 4 essais espacés, et un thème en échec n'empêche
-    pas les autres. La source n'est en erreur que si tous les thèmes échouent."""
-    autorises = tuple(domaines)
-    sortie = []
-    if hors_ligne:
-        lots = [(None, json.loads(charger(s, True)))]
-    else:
-        lots, erreurs = [], []
-        for i, (theme, q) in enumerate(s["requetes"].items()):
-            if i:
-                time.sleep(10)
-            params = {"query": f"{q} sourcelang:french", "mode": "artlist", "format": "json",
-                      "maxrecords": "75", "timespan": "24h", "sort": "datedesc"}
-            url = "https://api.gdeltproject.org/api/v2/doc/doc?" + urllib.parse.urlencode(params)
-            try:
-                lots.append((theme, lire_json(http(url, essais=4, pause=15, accept="application/json"))))
-            except Exception as e:   # GDELT renvoie parfois 429 ou un message texte
-                erreurs.append(f"{theme} : {e}")
-                print(f"  [gdelt] {theme} : {e}", file=sys.stderr)
-        if not lots:
-            raise RuntimeError("tous les thèmes ont échoué (" + " ; ".join(erreurs) + ")")
-    for theme, d in lots:
-        for a in d.get("articles", []):
-            dom = (a.get("domain") or "").lower().removeprefix("www.")
-            if autorises and not dom.endswith(autorises):
-                continue
-            sortie.append(article(a.get("title"), a.get("url"), lire_date(a.get("seendate")),
-                                  dom, indice_theme=theme))
-    return sortie
-
-
 TYPES_GDACS = {"EQ": "Séisme", "TC": "Cyclone tropical", "FL": "Inondations", "VO": "Éruption volcanique",
                "DR": "Sécheresse", "WF": "Feux de forêt", "TS": "Tsunami"}
 NIVEAUX_GDACS = {"red": "alerte rouge", "orange": "alerte orange", "green": "alerte verte"}
@@ -325,8 +290,6 @@ def main(argv=None):
                 t = s["type"]
                 if t == "rss":
                     lot = source_rss(s, args.hors_ligne)
-                elif t == "gdelt":
-                    lot = source_gdelt(s, args.hors_ligne, conf.get("domaines_gdelt", []))
                 elif t == "gdacs":
                     lot = source_gdacs(s, args.hors_ligne, pays_zone, noms_fr)
                 elif t == "reliefweb":

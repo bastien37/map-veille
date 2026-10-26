@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>MAP – Administration</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout : console d'exploitation — bandeau, onglets, une vue de travail à la fois ; mêmes jetons que le site public */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --ink:#14213a; --muted:#5b6679; --line:#d5dbe3; --soft:#f5f7fa;
+  --accent:#1f4690; --accentbg:#e6edf8; --heat1:#dbe4f3; --heat2:#b3c6e6; --heat3:#7d9ccf; --heat4:#3d63a8;
+  --ok:#1e7a46; --okbg:#e5f4ea; --warn:#a15c07; --warnbg:#fdf1de; --err:#b42318; --errbg:#fde8e6;
+  --display:"Saira Condensed","Arial Narrow",sans-serif;
+  --body:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1522; --panel:#161e2e; --ink:#e6ebf3; --muted:#9aa6ba; --line:#2a3447; --soft:#1b2436;
+  --accent:#86a8e6; --accentbg:#1e2d4a; --heat1:#1e2d4a; --heat2:#28447a; --heat3:#3a63a8; --heat4:#6f95db;
+  --ok:#5fd18f; --okbg:#143222; --warn:#f2b45a; --warnbg:#3a2a12; --err:#ff8a7e; --errbg:#3d1714; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45}
+.wrap{max-width:1280px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 24px}
+h1{font-family:var(--display);font-weight:700;font-size:2.1rem;line-height:1;margin:0;letter-spacing:.02em}
+h1 span{font-weight:500;color:var(--muted);font-size:1.05rem;letter-spacing:.06em;text-transform:uppercase;margin-left:10px}
+header a{color:var(--accent);font-weight:600;font-size:.9rem}
+h2{font-family:var(--display);font-weight:700;font-size:1.3rem;margin:0;letter-spacing:.02em}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* Onglets */
+nav[role=tablist]{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
+nav button{font:inherit;font-weight:600;font-size:.92rem;background:none;border:none;border-bottom:3px solid transparent;color:var(--muted);padding:10px 14px;cursor:pointer;white-space:nowrap;display:flex;gap:8px;align-items:center}
+nav button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent)}
+.compte{font-family:var(--mono);font-size:.72rem;background:var(--warnbg);color:var(--warn);padding:1px 7px;border-radius:999px}
+.compte:empty{display:none}
+
+/* Blocs */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.tile b{font-family:var(--display);font-size:2rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.tile span{font-size:.82rem;color:var(--muted)}
+.tile.alerte{border-color:var(--warn)} .tile.alerte b{color:var(--warn)}
+.grille2{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;align-items:start}
+.defile{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-family:var(--display);font-weight:600;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+td.h1{background:var(--heat1)} td.h2{background:var(--heat2)} td.h3{background:var(--heat3);color:#fff} td.h4{background:var(--heat4);color:#fff}
+
+/* Formulaires */
+.filtres{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+label.champ{display:flex;flex-direction:column;gap:3px;font-size:.78rem;color:var(--muted);font-weight:500}
+input,select,button{font:inherit;font-size:.88rem}
+input[type=search],select{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:4px;padding:6px 8px;min-width:0}
+input[type=search]{width:min(320px,100%)}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:4px;padding:6px 12px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--soft)}
+.btn.primaire{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+.btn.danger{color:var(--err)}
+.btn:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:2px solid var(--warn);outline-offset:2px}
+
+/* Lignes d'articles */
+.articles{list-style:none;margin:0;padding:0}
+.articles li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;padding:12px 0;border-bottom:1px solid var(--line);align-items:center}
+.articles li:last-child{border-bottom:none}
+.articles h3{font-size:.95rem;font-weight:600;margin:0 0 3px}
+.articles h3 a{color:inherit;text-decoration:none} .articles h3 a:hover{text-decoration:underline}
+.meta{font-family:var(--mono);font-size:.72rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:2px 10px}
+.actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+.pastille{font-family:var(--mono);font-size:.68rem;letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:3px}
+.p-manuel{background:var(--accentbg);color:var(--accent)} .p-masque{background:var(--errbg);color:var(--err)} .p-trier{background:var(--warnbg);color:var(--warn)}
+.p-ok{background:var(--okbg);color:var(--ok)} .p-err{background:var(--errbg);color:var(--err)}
+li.masque h3{text-decoration:line-through;color:var(--muted)}
+.vide{padding:24px 0;text-align:center;color:var(--muted)}
+
+/* Collectes */
+.collecte{border-bottom:1px solid var(--line);padding:10px 0;display:flex;flex-direction:column;gap:6px}
+.collecte:last-child{border-bottom:none}
+.sources{display:flex;flex-direction:column;gap:3px;font-size:.82rem}
+.sources div{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+pre{background:var(--soft);border:1px solid var(--line);border-radius:4px;padding:10px;font-family:var(--mono);font-size:.78rem;white-space:pre-wrap;margin:0;max-height:320px;overflow:auto}
+
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:6px;font-size:.88rem;box-shadow:0 4px 16px rgb(0 0 0 / .2);max-width:calc(100% - 32px)}
+#toast.erreur{background:var(--err);color:#fff}
+@media (max-width:820px){
+  .grille2{grid-template-columns:1fr}
+  .articles li{grid-template-columns:1fr}
+  .actions{justify-content:flex-start}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MAP<span>Administration</span></h1>
+    <a href="/" target="_blank" rel="noopener">Voir le site public ↗</a>
+  </header>
+
+  <nav role="tablist" aria-label="Sections">
+    <button role="tab" id="t-tableau" aria-controls="v-tableau" aria-selected="true">Tableau de bord</button>
+    <button role="tab" id="t-trier" aria-controls="v-trier" aria-selected="false">À trier <span class="compte" id="c-trier"></span></button>
+    <button role="tab" id="t-articles" aria-controls="v-articles" aria-selected="false">Articles</button>
+    <button role="tab" id="t-collectes" aria-controls="v-collectes" aria-selected="false">Collectes <span class="compte" id="c-erreurs"></span></button>
+  </nav>
+
+  <!-- Tableau de bord -->
+  <section id="v-tableau" role="tabpanel" aria-labelledby="t-tableau">
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="tiles" id="tuiles"></div>
+      <div class="grille2">
+        <div class="panel">
+          <h2>Articles visibles sur le site, 30 derniers jours</h2>
+          <div class="defile"><table id="croise"></table></div>
+        </div>
+        <div class="panel">
+          <h2>Sources</h2>
+          <div class="defile"><table id="sources"></table></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- À trier -->
+  <section id="v-trier" role="tabpanel" aria-labelledby="t-trier" hidden>
+    <div class="panel">
+      <div>
+        <h2>Articles à trier</h2>
+        <p class="muted" style="margin:4px 0 0;font-size:.88rem">Le tri automatique n'a pas trouvé leur zone ou leur thème : ils ne sont pas publiés. Classez-les, ou masquez ceux qui sont hors sujet (actualité française, culture…). Un article classé ici n'est plus jamais modifié par le collecteur.</p>
+      </div>
+      <ul class="articles" id="l-trier"></ul>
+      <div id="plus-trier"></div>
+    </div>
+  </section>
+
+  <!-- Articles -->
+  <section id="v-articles" role="tabpanel" aria-labelledby="t-articles" hidden>
+    <div class="panel">
+      <form class="filtres" id="f-articles">
+        <label class="champ">Rechercher dans les titres<input type="search" id="q" placeholder="ex. Taïwan, Sahel, OTAN"></label>
+        <label class="champ">Statut
+          <select id="statut">
+            <option value="tous">Tous</option><option value="publies">Publiés</option>
+            <option value="a_trier">À trier</option><option value="manuels">Classés à la main</option>
+            <option value="masques">Masqués</option>
+          </select></label>
+        <label class="champ">Zone<select id="fzone"></select></label>
+        <label class="champ">Thème<select id="ftheme"></select></label>
+        <button class="btn primaire" type="submit">Filtrer</button>
+      </form>
+      <p class="muted mono" id="n-articles" style="margin:0;font-size:.8rem"></p>
+      <ul class="articles" id="l-articles"></ul>
+      <div id="plus-articles"></div>
+    </div>
+  </section>
+
+  <!-- Collectes -->
+  <section id="v-collectes" role="tabpanel" aria-labelledby="t-collectes" hidden>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="panel">
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+          <div>
+            <h2>Lancer une collecte</h2>
+            <p class="muted" style="margin:4px 0 0;font-size:.88rem">Interroge maintenant toutes les sources actives. Cela prend quelques secondes.</p>
+          </div>
+          <button class="btn primaire" id="lancer">Lancer la collecte</button>
+        </div>
+        <p id="etat-collecte" class="mono" style="margin:0;font-size:.82rem" aria-live="polite"></p>
+        <pre id="sortie-collecte" hidden></pre>
+      </div>
+      <div class="panel">
+        <h2>Journal des collectes</h2>
+        <div id="journal"></div>
+      </div>
+    </div>
+  </section>
+</div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=d=>d?new Date(d).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
+let ZONES={}, THEMES={};
+
+async function api(chemin,{methode="GET",corps,params}={}){
+  const q=params?"?"+new URLSearchParams(Object.entries(params).filter(([,v])=>v!==""&&v!=null)):"";
+  const r=await fetch("/api/admin/"+chemin+q,{method:methode,cache:"no-store",
+    headers:corps?{"Content-Type":"application/json"}:{},body:corps?JSON.stringify(corps):undefined});
+  if(!r.ok){let m="Erreur "+r.status;try{const d=await r.json();m=typeof d.detail==="string"?d.detail:m}catch{}throw new Error(m)}
+  return r.json();
+}
+let minuteur;
+function toast(texte,erreur=false){
+  const t=$("#toast");t.textContent=texte;t.className=erreur?"erreur":"";t.hidden=false;
+  clearTimeout(minuteur);minuteur=setTimeout(()=>t.hidden=true,erreur?6000:3000);
+}
+
+// ---------- onglets ----------
+const ONGLETS={tableau:chargerTableau,trier:()=>chargerListe("trier",true),articles:()=>chargerListe("articles",true),collectes:chargerCollectes};
+function ouvrir(nom){
+  document.querySelectorAll("[role=tab]").forEach(b=>b.setAttribute("aria-selected",b.id==="t-"+nom));
+  document.querySelectorAll("[role=tabpanel]").forEach(p=>p.hidden=p.id!=="v-"+nom);
+  try{localStorage.setItem("map-admin-onglet",nom)}catch{}
+  ONGLETS[nom]();
+}
+document.querySelectorAll("[role=tab]").forEach(b=>b.onclick=()=>ouvrir(b.id.slice(2)));
+
+// ---------- tableau de bord ----------
+async function chargerTableau(){
+  try{
+    const d=await api("tableau"); ZONES=d.zones; THEMES=d.themes; remplirFiltres();
+    const c=d.compteurs;
+    $("#c-trier").textContent=c.a_trier||"";
+    $("#tuiles").innerHTML=[
+      [c.fil,"articles visibles sur le site (30 jours)"],[c.total,"articles dans la base"],
+      [c.a_trier,"à trier",c.a_trier>0],[c.manuels,"classés à la main"],[c.masques,"masqués"]
+    ].map(([n,l,a])=>`<div class="tile${a?" alerte":""}"><b>${n}</b><span>${l}</span></div>`).join("");
+    const th=Object.keys(THEMES), max=Math.max(1,...Object.values(d.croise).flatMap(Object.values));
+    $("#croise").innerHTML=`<thead><tr><th>Zone</th>${th.map(t=>`<th class="n" title="${esc(THEMES[t])}">${t}</th>`).join("")}<th class="n">Total</th></tr></thead><tbody>`+
+      Object.entries(d.croise).map(([z,l])=>{const tot=Object.values(l).reduce((a,b)=>a+b,0);
+        return `<tr><td>${esc(ZONES[z])}</td>${th.map(t=>{const n=l[t];return `<td class="n ${n?"h"+Math.ceil(4*n/max):""}">${n||""}</td>`}).join("")}<td class="n"><b>${tot}</b></td></tr>`}).join("")+
+      `</tbody>`;
+    $("#sources").innerHTML=`<thead><tr><th>Source</th><th class="n">30 j</th><th class="n">Total</th><th>Dernier article</th></tr></thead><tbody>`+
+      d.sources.map(s=>`<tr><td>${esc(s.source)}</td><td class="n">${s.recents}</td><td class="n">${s.total}</td><td class="mono" style="font-size:.78rem">${fmt(s.dernier)}</td></tr>`).join("")+`</tbody>`;
+  }catch(e){toast(e.message,true)}
+}
+
+// ---------- listes d'articles (À trier et Articles) ----------
+function remplirFiltres(){
+  if($("#fzone").options.length)return;
+  const opt=(o,vide)=>`<option value="">${vide}</option><option value="aucun">— non renseigné —</option>`+Object.entries(o).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join("");
+  $("#fzone").innerHTML=opt(ZONES,"Toutes"); $("#ftheme").innerHTML=opt(THEMES,"Tous");
+}
+const select=(o,val,cls)=>`<select class="${cls}" aria-label="${cls==="z"?"Zone":"Thème"}"><option value="">${cls==="z"?"Zone…":"Thème…"}</option>`+
+  Object.entries(o).map(([k,v])=>`<option value="${k}"${k===val?" selected":""}>${esc(v)}</option>`).join("")+`</select>`;
+
+function ligne(a){
+  const pastilles=[a.masque?'<span class="pastille p-masque">masqué</span>':"",a.manuel?'<span class="pastille p-manuel">classé à la main</span>':"",
+    (!a.zone||!a.theme)&&!a.masque?'<span class="pastille p-trier">à trier</span>':""].join("");
+  return `<li data-id="${a.id}" class="${a.masque?"masque":""}">
+    <div style="min-width:0">
+      <h3><a href="${esc(a.lien)}" target="_blank" rel="noopener">${esc(a.titre)}</a></h3>
+      <div class="meta"><span>n° ${a.id}</span><span>${esc(a.source)}</span><span>${fmt(a.date)}</span>${pastilles}</div>
+    </div>
+    <div class="actions">${select(ZONES,a.zone,"z")}${select(THEMES,a.theme,"t")}
+      <button class="btn primaire" data-action="classer">Classer</button>
+      <button class="btn ${a.masque?"":"danger"}" data-action="${a.masque?"afficher":"masquer"}">${a.masque?"Réafficher":"Masquer"}</button>
+    </div></li>`;
+}
+
+const listes={trier:{decalage:0,total:0},articles:{decalage:0,total:0}};
+const PAS=50;
+async function chargerListe(nom,depart){
+  const L=listes[nom], ul=$("#l-"+nom);
+  if(depart){L.decalage=0;ul.innerHTML='<li class="vide">Chargement…</li>'}
+  if(!Object.keys(ZONES).length)await chargerTableau();
+  const params=nom==="trier"?{statut:"a_trier"}:{statut:$("#statut").value,q:$("#q").value.trim(),zone:$("#fzone").value,theme:$("#ftheme").value};
+  try{
+    const d=await api("articles",{params:{...params,limite:PAS,decalage:L.decalage}});
+    L.total=d.total; L.decalage+=d.articles.length;
+    const html=d.articles.map(ligne).join("");
+    if(depart)ul.innerHTML=html||`<li class="vide">${nom==="trier"?"Rien à trier : le tri automatique a tout classé.":"Aucun article ne correspond à ces filtres."}</li>`;
+    else ul.insertAdjacentHTML("beforeend",html);
+    if(nom==="trier")$("#c-trier").textContent=d.total||"";
+    else $("#n-articles").textContent=`${d.total} article${d.total>1?"s":""}`;
+    const reste=L.total-L.decalage;
+    $("#plus-"+nom).innerHTML=reste>0?`<button class="btn" data-plus="${nom}">Afficher ${Math.min(PAS,reste)} de plus (${reste} restants)</button>`:"";
+  }catch(e){ul.innerHTML=`<li class="vide">${esc(e.message)}</li>`}
+}
+$("#f-articles").onsubmit=e=>{e.preventDefault();chargerListe("articles",true)};
+["#statut","#fzone","#ftheme"].forEach(s=>$(s).onchange=()=>chargerListe("articles",true));
+
+document.addEventListener("click",async e=>{
+  const plus=e.target.dataset.plus; if(plus){e.target.disabled=true;await chargerListe(plus,false);return}
+  const action=e.target.dataset.action; if(!action)return;
+  const li=e.target.closest("li"), id=li.dataset.id, liste=li.parentElement.id==="l-trier"?"trier":"articles";
+  let corps;
+  if(action==="classer"){
+    const zone=li.querySelector(".z").value, theme=li.querySelector(".t").value;
+    if(!zone||!theme){toast("Choisissez une zone et un thème avant de classer.",true);return}
+    corps={zone,theme};
+  }else corps={masque:action==="masquer"};
+  e.target.disabled=true;
+  try{
+    const a=await api("articles/"+id,{methode:"PATCH",corps});
+    if(liste==="trier"){li.remove();listes.trier.decalage--;const n=Math.max(0,(+$("#c-trier").textContent||1)-1);$("#c-trier").textContent=n||"";
+      if(!$("#l-trier li"))chargerListe("trier",true)}
+    else li.outerHTML=ligne(a);
+    toast(action==="classer"?`Article n° ${id} classé : ${ZONES[a.zone]} · ${THEMES[a.theme]}. Visible sur le site.`
+      :action==="masquer"?`Article n° ${id} masqué : il n'apparaît plus sur le site.`:`Article n° ${id} de nouveau affiché.`);
+  }catch(err){e.target.disabled=false;toast(err.message,true)}
+});
+
+// ---------- collectes ----------
+let suivi;
+function afficherEtat(s){
+  const b=$("#lancer"), p=$("#etat-collecte"), pre=$("#sortie-collecte");
+  b.disabled=s.en_cours;
+  if(s.en_cours){p.textContent=`Collecte en cours depuis ${fmt(s.debut)}…`;b.textContent="Collecte en cours…"}
+  else{b.textContent="Lancer la collecte";
+    p.innerHTML=s.fin?(s.code===0?`<span class="pastille p-ok">terminée</span> à ${fmt(s.fin)}`:`<span class="pastille p-err">échec</span> à ${fmt(s.fin)} (code ${s.code})`):""}
+  pre.hidden=!s.sortie; pre.textContent=s.sortie||"";
+}
+async function suivre(){
+  clearTimeout(suivi);
+  try{const s=await api("collecte");afficherEtat(s);
+    if(s.en_cours)suivi=setTimeout(suivre,3000);else if(s.fin){chargerJournal();chargerTableau()}
+  }catch(e){toast(e.message,true)}
+}
+$("#lancer").onclick=async()=>{
+  try{afficherEtat(await api("collecte",{methode:"POST"}));toast("Collecte lancée.");suivi=setTimeout(suivre,3000)}
+  catch(e){toast(e.message,true)}
+};
+async function chargerJournal(){
+  try{
+    const j=await api("collectes");
+    const derniere=j.find(c=>!c.hors_ligne);
+    const erreurs=derniere?derniere.sources.filter(s=>s.statut==="erreur").length:0;
+    $("#c-erreurs").textContent=erreurs?erreurs+" en erreur":"";
+    $("#journal").innerHTML=j.length?j.map(c=>`<div class="collecte">
+      <div style="display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline">
+        <b class="mono">n° ${c.id}</b><span class="mono">${fmt(c.debut)}</span>
+        ${c.hors_ligne?'<span class="pastille p-trier">test hors ligne</span>':""}
+        ${c.fin?`<span class="muted">${c.nb_lus} lus · <b>${c.nb_nouveaux} nouveaux</b> · ${c.nb_doublons} doublons</span>`:'<span class="pastille p-trier">inachevée</span>'}
+      </div>
+      <div class="sources">${c.sources.map(s=>`<div><span class="pastille ${s.statut==="ok"?"p-ok":"p-err"}">${s.statut}</span><span>${esc(s.source)}</span>
+        <span class="muted">${s.statut==="ok"?s.nb+" éléments":esc(s.message)}</span></div>`).join("")}</div></div>`).join("")
+      :'<p class="vide">Aucune collecte pour l\'instant.</p>';
+  }catch(e){toast(e.message,true)}
+}
+function chargerCollectes(){chargerJournal();suivre()}
+
+// ---------- démarrage ----------
+(async()=>{
+  let nom="tableau";try{nom=localStorage.getItem("map-admin-onglet")||nom}catch{}
+  if(!ONGLETS[nom])nom="tableau";
+  await chargerTableau(); chargerJournal();
+  if(nom!=="tableau")ouvrir(nom);
+})();
+</script>
+</body>
+</html>

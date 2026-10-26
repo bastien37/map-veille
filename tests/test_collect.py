@@ -43,7 +43,7 @@ def test_mot_court_ne_matche_pas_dans_un_autre_mot():
 @pytest.mark.parametrize("texte", [
     "Sun, 25 Oct 2026 08:00:00 +0100",   # RSS
     "2026-10-25T07:00:00Z",              # Atom
-    "20261025T070000Z",                  # GDELT
+    "20261025T070000Z",                  # ISO compact
 ])
 def test_formats_de_date(texte):
     assert collect.lire_date(texte) == datetime(2026, 10, 25, 7, 0, tzinfo=timezone.utc)
@@ -65,13 +65,6 @@ def test_rss_et_atom():
 def test_rss_illisible():
     with pytest.raises(ValueError):
         collect.lire_rss(b"ceci n'est pas un flux", "X")
-
-
-def test_gdelt_filtre_les_domaines():
-    s = {"fichier_test": "tests/gdelt.json"}
-    lot = collect.source_gdelt(s, True, ["lemonde.fr", "opex360.com", "jeuneafrique.com"])
-    assert len(lot) == 3
-    assert "site-inconnu.example" not in {a["source"] for a in lot}
 
 
 def test_gdacs_zone_et_nom_francais():
@@ -104,16 +97,16 @@ def lancer(tmp_path, *options):
 
 def test_chaine_complete_hors_ligne(tmp_path):
     fil = lancer(tmp_path, "--hors-ligne")
-    assert len(fil) == 6
+    assert len(fil) == 3   # les 3 alertes GDACS des fichiers de test
     ajout = {a["lien"]: a["ajout"] for a in fil}
 
     fil2 = lancer(tmp_path, "--hors-ligne")   # deuxième passage : pas de doublon, dates d'ajout conservées
     assert {a["lien"]: a["ajout"] for a in fil2} == ajout
 
     cx = base.ouvrir(tmp_path / "map.sqlite")
-    assert cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 6
+    assert cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 3
     assert cx.execute("SELECT COUNT(*) FROM collectes").fetchone()[0] == 2
-    assert cx.execute("SELECT COUNT(*) FROM collectes_sources WHERE statut = 'ok'").fetchone()[0] == 4
+    assert cx.execute("SELECT COUNT(*) FROM collectes_sources WHERE statut = 'ok'").fetchone()[0] == 2
 
 
 def test_aucune_donnee_ecrite_dans_le_front(tmp_path):
@@ -190,25 +183,3 @@ def test_gdacs_reponse_vide(monkeypatch):
 def test_reponse_non_json_lisible():
     with pytest.raises(ValueError, match="non JSON"):
         collect.lire_json(b"<html>Erreur</html>")
-
-
-def test_gdelt_un_theme_en_echec_n_arrete_pas_les_autres(monkeypatch):
-    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
-    reponses = iter([RuntimeError("HTTP Error 429"), (TESTS / "gdelt.json").read_bytes()])
-
-    def faux_http(*a, **k):
-        r = next(reponses)
-        if isinstance(r, Exception):
-            raise r
-        return r
-    monkeypatch.setattr(collect, "http", faux_http)
-    s = {"requetes": {"def": "(guerre)", "dip": "(sommet)"}}
-    lot = collect.source_gdelt(s, False, ["lemonde.fr"])
-    assert len(lot) == 1 and lot[0]["indice_theme"] == "dip"
-
-
-def test_gdelt_tous_les_themes_en_echec(monkeypatch):
-    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
-    monkeypatch.setattr(collect, "http", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HTTP Error 429")))
-    with pytest.raises(RuntimeError, match="tous les thèmes"):
-        collect.source_gdelt({"requetes": {"def": "(guerre)"}}, False, [])

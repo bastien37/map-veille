@@ -34,7 +34,7 @@ THEMES = {
     "cli": "Climat et catastrophes naturelles",
 }
 
-VERSION_SCHEMA = 1
+VERSION_SCHEMA = 2   # v2 : colonne articles.masque (modération depuis l'administration)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS zones (
     code  TEXT PRIMARY KEY,
@@ -71,37 +71,86 @@ CREATE TABLE IF NOT EXISTS articles (
     zone        TEXT REFERENCES zones(code),    -- NULL = à trier (D04)
     theme       TEXT REFERENCES themes(code),   -- NULL = à trier (D04)
     manuel      INTEGER NOT NULL DEFAULT 0 CHECK (manuel IN (0, 1)),
+    masque      INTEGER NOT NULL DEFAULT 0 CHECK (masque IN (0, 1)),  -- retiré du site par un administrateur
     ajout       TEXT NOT NULL,                  -- première collecte (repère « Nouveau »)
     maj         TEXT NOT NULL,                  -- dernière modification
     collecte_id INTEGER REFERENCES collectes(id)
 );
 CREATE INDEX IF NOT EXISTS idx_articles_date  ON articles(date_pub);
 CREATE INDEX IF NOT EXISTS idx_articles_titre ON articles(titre_norm);
+"""
 
--- Articles publiables (zone ET thème connus)
-CREATE VIEW IF NOT EXISTS fil AS
-    SELECT * FROM articles WHERE zone IS NOT NULL AND theme IS NOT NULL;
+VUES = """
+DROP VIEW IF EXISTS fil;
+DROP VIEW IF EXISTS a_trier;
 
--- Articles que le tri automatique n'a pas su classer
-CREATE VIEW IF NOT EXISTS a_trier AS
-    SELECT * FROM articles WHERE zone IS NULL OR theme IS NULL;
+-- Articles publiables : zone ET thème connus, non masqués
+CREATE VIEW fil AS
+    SELECT * FROM articles WHERE zone IS NOT NULL AND theme IS NOT NULL AND masque = 0;
+
+-- Articles que le tri automatique n'a pas su classer (hors articles masqués)
+CREATE VIEW a_trier AS
+    SELECT * FROM articles WHERE (zone IS NULL OR theme IS NULL) AND masque = 0;
 """
 
 
-def ouvrir(chemin=BASE) -> sqlite3.Connection:
-    """Ouvre (et crée si besoin) la base, avec les tables de référence à jour."""
+ATTENTE_VERROU = 30   # secondes d'attente si un autre programme écrit dans la base
+
+
+def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
+    """Ouvre la base. La crée ou la met à jour (migration) seulement si c'est nécessaire :
+    une base déjà à jour est ouverte sans aucune écriture, ce qui évite les conflits de verrou
+    entre le serveur, l'administration et le collecteur.
+
+    multi_thread=True autorise l'usage de la connexion depuis un autre thread que celui qui l'a
+    ouverte : nécessaire dans FastAPI, qui ouvre la dépendance et exécute la route dans deux
+    threads différents. La connexion reste propre à une seule requête."""
     chemin = Path(chemin)
     chemin.parent.mkdir(parents=True, exist_ok=True)
-    cx = sqlite3.connect(chemin)
+    cx = sqlite3.connect(chemin, timeout=ATTENTE_VERROU, check_same_thread=not multi_thread)
     cx.row_factory = sqlite3.Row
     cx.execute("PRAGMA foreign_keys = ON")
+    if a_jour(cx):
+        return cx
     cx.execute("PRAGMA journal_mode = WAL")   # l'API peut lire pendant que le collecteur écrit
-    cx.executescript(SCHEMA)
-    cx.executemany("INSERT OR REPLACE INTO zones VALUES (?, ?)", ZONES.items())
-    cx.executemany("INSERT OR REPLACE INTO themes VALUES (?, ?)", THEMES.items())
-    cx.execute(f"PRAGMA user_version = {VERSION_SCHEMA}")
-    cx.commit()
+    cx.execute("BEGIN IMMEDIATE")             # prend le verrou d'écriture d'un coup, puis attend s'il est pris
+    try:
+        if not a_jour(cx):                    # un autre programme a pu migrer pendant l'attente
+            for instruction in _instructions(SCHEMA):
+                cx.execute(instruction)
+            colonnes = {r["name"] for r in cx.execute("PRAGMA table_info(articles)")}
+            if "masque" not in colonnes:      # migration d'une base v1
+                cx.execute("ALTER TABLE articles ADD COLUMN masque INTEGER NOT NULL DEFAULT 0 "
+                           "CHECK (masque IN (0, 1))")
+            for instruction in _instructions(VUES):
+                cx.execute(instruction)
+            cx.executemany("INSERT OR REPLACE INTO zones VALUES (?, ?)", ZONES.items())
+            cx.executemany("INSERT OR REPLACE INTO themes VALUES (?, ?)", THEMES.items())
+            cx.execute(f"PRAGMA user_version = {VERSION_SCHEMA}")
+        cx.commit()
+    except Exception:
+        cx.rollback()
+        cx.close()
+        raise
     return cx
+
+
+def a_jour(cx) -> bool:
+    """Vrai si le schéma est à la bonne version et les référentiels identiques au code."""
+    if cx.execute("PRAGMA user_version").fetchone()[0] != VERSION_SCHEMA:
+        return False
+    try:
+        return (dict(cx.execute("SELECT code, nom FROM zones").fetchall()) == ZONES
+                and dict(cx.execute("SELECT code, nom FROM themes").fetchall()) == THEMES)
+    except sqlite3.OperationalError:
+        return False
+
+
+def _instructions(script: str):
+    """Découpe un script SQL en instructions (sans commentaires), pour les exécuter
+    dans une seule transaction (executescript ferait un COMMIT intermédiaire)."""
+    sans_commentaires = "\n".join(l.split("--")[0] for l in script.splitlines())
+    return [i.strip() for i in sans_commentaires.split(";") if i.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +159,14 @@ def ouvrir(chemin=BASE) -> sqlite3.Connection:
 def debut_collecte(cx, maintenant: datetime, hors_ligne: bool) -> int:
     cur = cx.execute("INSERT INTO collectes (debut, hors_ligne) VALUES (?, ?)",
                      (maintenant.isoformat(), int(hors_ligne)))
+    cx.commit()   # ne pas garder le verrou d'écriture pendant que les sources sont interrogées
     return cur.lastrowid
 
 
 def noter_source(cx, collecte_id: int, source: str, ok: bool, nb: int = 0, message: str = None):
     cx.execute("INSERT OR REPLACE INTO collectes_sources VALUES (?, ?, ?, ?, ?)",
                (collecte_id, source, "ok" if ok else "erreur", nb, message))
+    cx.commit()
 
 
 def fin_collecte(cx, collecte_id: int, fin: datetime, nb_lus: int, nb_nouveaux: int, nb_doublons: int):
@@ -164,6 +215,14 @@ def classer_a_la_main(cx, article_id: int, zone: str, theme: str, maintenant: da
         raise ValueError(f"zone ou thème inconnu : {zone} / {theme}")
     cur = cx.execute("UPDATE articles SET zone = ?, theme = ?, manuel = 1, maj = ? WHERE id = ?",
                      (zone, theme, maintenant.isoformat(), article_id))
+    cx.commit()
+    return cur.rowcount == 1
+
+
+def masquer(cx, article_id: int, masque: bool, maintenant: datetime) -> bool:
+    """Retire un article du site (ou l'y remet) sans le supprimer de la base."""
+    cur = cx.execute("UPDATE articles SET masque = ?, maj = ? WHERE id = ?",
+                     (int(masque), maintenant.isoformat(), article_id))
     cx.commit()
     return cur.rowcount == 1
 

@@ -1,12 +1,5 @@
 {
-  "_commentaire": "Liste validée des sources (exigence D01). type = rss | gdelt | gdacs | reliefweb. Mettre actif à false pour couper une source sans la supprimer. fichier_test sert au test hors ligne (option --hors-ligne). URL et conditions d'utilisation à confirmer au lot LT3 (C03, C04).",
-
-  "domaines_gdelt": [
-    "lemonde.fr", "france24.com", "rfi.fr", "francetvinfo.fr", "lefigaro.fr", "liberation.fr",
-    "la-croix.com", "ouest-france.fr", "courrierinternational.com", "lesechos.fr", "lopinion.fr",
-    "tv5monde.com", "opex360.com", "rtbf.be", "lesoir.be", "rts.ch", "letemps.ch",
-    "radio-canada.ca", "ledevoir.com", "jeuneafrique.com", "lorientlejour.com"
-  ],
+  "_commentaire": "Liste validée des sources (exigence D01). type = rss | gdacs | reliefweb. Mettre actif à false pour couper une source sans la supprimer. fichier_test sert au test hors ligne (option --hors-ligne). URL et conditions d'utilisation à confirmer au lot LT3 (C03, C04).",
 
   "sources": [
     {"type": "rss", "nom": "Le Monde", "url": "https://www.lemonde.fr/international/rss_full.xml", "actif": true},
@@ -15,22 +8,12 @@
     {"type": "rss", "nom": "franceinfo", "url": "https://www.francetvinfo.fr/monde.rss", "actif": true},
     {"type": "rss", "nom": "Courrier international", "url": "https://www.courrierinternational.com/feed/all/rss.xml", "actif": false},
 
-    {"type": "gdelt", "nom": "GDELT", "actif": true, "fichier_test": "tests/gdelt.json",
-     "_aide": "Moteur mondial d'indexation de la presse. Une requête par thème, en français, sur les dernières 24 h. Le nom affiché est celui du média (domaine), filtré par domaines_gdelt.",
-     "requetes": {
-       "def": "(guerre OR armée OR militaire OR frappes OR missile OR drones OR otan OR jihadistes)",
-       "dip": "(sommet OR diplomatie OR négociations OR sanctions OR élection OR ambassadeur OR onu)",
-       "eco": "(pétrole OR gaz OR inflation OR \"droits de douane\" OR exportations OR économie)",
-       "tec": "(satellite OR spatial OR fusée OR cyberattaque OR \"intelligence artificielle\" OR semi-conducteurs)",
-       "cli": "(séisme OR inondations OR ouragan OR typhon OR cyclone OR sécheresse OR incendies OR éruption)"
-     }},
-
     {"type": "gdacs", "nom": "GDACS (ONU / Commission européenne)", "actif": true, "fichier_test": "tests/gdacs.json",
      "_aide": "Alertes de catastrophes naturelles. Le pays est fourni par l'API : zone exacte, thème Climat et catastrophes.",
      "niveaux": "orange;red", "jours": 7},
 
     {"type": "reliefweb", "nom": "ReliefWeb (OCHA)", "actif": false, "fichier_test": "tests/reliefweb.json",
-     "_aide": "Rapports humanitaires de l'ONU, filtrés en français. Nécessite un appname approuvé par ReliefWeb, à mettre dans la variable d'environnement RELIEFWEB_APPNAME (secret GitHub). Passer actif à true une fois l'appname obtenu. Thème : mots-clés, sinon Climat et catastrophes si le rapport porte sur une catastrophe, sinon theme_defaut.",
+     "_aide": "Rapports humanitaires de l'ONU, filtrés en français. Nécessite un appname approuvé par ReliefWeb, à mettre dans la variable d'environnement RELIEFWEB_APPNAME sur la machine qui lance la collecte. Passer actif à true une fois l'appname obtenu. Thème : mots-clés, sinon Climat et catastrophes si le rapport porte sur une catastrophe, sinon theme_defaut.",
      "theme_defaut": "dip"}
   ]
 }

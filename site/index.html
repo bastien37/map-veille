@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MAP – Carte de veille</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout : tableau de situation — carte des 6 zones à gauche, fil filtré à droite ; empilé sur téléphone */
@@ -19,6 +23,9 @@
   --bg:#0f1522; --panel:#161e2e; --ink:#e6ebf3; --muted:#9aa6ba; --line:#2a3447;
   --land:#232d40; --heat1:#253c63; --heat2:#2f5594; --heat3:#4b78c4; --heat4:#86a8e6;
   --accent:#86a8e6; --new:#fb9a5b; --newbg:#3a2316; --sea:#121a28; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+[hidden]{display:none!important}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45}
 .wrap{max-width:1280px;margin:0 auto;padding-block:20px 32px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
 header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 24px}
@@ -75,6 +82,8 @@ footer{font-size:.78rem;color:var(--muted);max-width:75ch}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
+</head>
+<body>
 
 <div class="wrap">
   <header>
@@ -228,3 +237,5 @@ async function actualiser(){
   if(document.fonts)document.fonts.ready.then(actualiser);   // recalcule la largeur des étiquettes
 })();
 </script>
+</body>
+</html>

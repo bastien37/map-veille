@@ -31,11 +31,11 @@ Le front ne contient **aucune donnée**, ni actualité, ni liste de zones ou de 
 
 | Table ou vue | Contenu |
 |---|---|
-| `articles` | Tous les articles collectés : lien (unique), titre, source, date de publication, zone, thème, date d'ajout, correction manuelle |
+| `articles` | Tous les articles collectés : lien (unique), titre, source, date de publication, zone, thème, date d'ajout, correction manuelle, masquage |
 | `zones`, `themes` | Les 6 zones et les 5 thèmes. Les clés étrangères empêchent un code inconnu. |
 | `collectes` | Journal des passages du collecteur : date, éléments lus, nouveaux articles, doublons |
 | `collectes_sources` | Pour chaque passage, le résultat de chaque source (ok ou erreur, avec le message) |
-| `fil` (vue) | Les articles publiables, c'est-à-dire avec une zone et un thème |
+| `fil` (vue) | Les articles publiables, c'est-à-dire avec une zone et un thème, et non masqués |
 | `a_trier` (vue) | Les articles que le tri n'a pas su classer |
 
 On peut ouvrir la base avec [DB Browser for SQLite](https://sqlitebrowser.org/) ou n'importe quel outil SQL, par exemple pour compter les articles par zone et par semaine.
@@ -57,11 +57,8 @@ Un article classé à la main n'est plus jamais modifié par le collecteur, et i
 | Type | Source | Clé | Ce qu'elle apporte |
 |---|---|---|---|
 | `rss` | Le Monde, France 24, RFI, franceinfo | aucune | Actualité internationale des grands médias français |
-| `gdelt` | [GDELT DOC 2.0](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/) | aucune | Presse mondiale indexée en continu. Une requête par thème, en français, sur 24 h. |
 | `gdacs` | [GDACS](https://www.gdacs.org/) (ONU / Commission européenne) | aucune | Alertes orange et rouges : séismes, cyclones, inondations, volcans, sécheresses, feux, tsunamis. Pays fourni par l'API. |
 | `reliefweb` | [ReliefWeb](https://apidoc.reliefweb.int/) (OCHA, ONU) | **appname** | Rapports humanitaires en français, pays fourni par l'API. Désactivé tant que l'appname n'est pas obtenu. |
-
-**GDELT** indexe tous les sites francophones, y compris des sites peu fiables ou de propagande. Seuls les domaines listés dans `domaines_gdelt` (sources.json) sont donc gardés. La liste est à valider avec l'équipe LT3. L'API accepte au plus une requête toutes les 5 secondes, et le script attend 6 secondes entre deux thèmes.
 
 **ReliefWeb** demande un `appname` approuvé pour chaque requête. Pour l'activer :
 1. Demander un appname via le formulaire indiqué sur https://apidoc.reliefweb.int/parameters (par exemple `eae-map-veille`, avec une adresse de contact).
@@ -69,6 +66,31 @@ Un article classé à la main n'est plus jamais modifié par le collecteur, et i
 3. Dans `sources.json`, passer la source ReliefWeb à `"actif": true`.
 
 **GDACS** demande de citer la source sous la forme « Global Disaster Alert and Coordination System, GDACS ». C'est fait automatiquement, car c'est le nom de la source affiché sous chaque alerte.
+
+## Interface d'administration
+
+Une console web, réservée à l'équipe, est disponible sur **http://localhost:8000/admin**. Elle a quatre onglets :
+
+- **Tableau de bord** : chiffres clés, articles visibles par zone et par thème, activité de chaque source.
+- **À trier** : les articles que le tri automatique n'a pas su classer. On choisit leur zone et leur thème puis on clique sur « Classer » : l'article apparaît aussitôt sur le site. « Masquer » écarte un article hors sujet (actualité française, culture…).
+- **Articles** : recherche dans les titres, filtres par statut, zone et thème. On peut reclasser n'importe quel article, le masquer ou le réafficher. Un article masqué reste dans la base mais disparaît du site.
+- **Collectes** : bouton « Lancer la collecte » et journal des passages, avec l'état et le message d'erreur de chaque source.
+
+L'accès est protégé par un mot de passe. L'identifiant est `admin`, et le mot de passe est celui de la variable d'environnement `MAP_ADMIN_MOT_DE_PASSE`. Sans cette variable, l'administration est désactivée.
+
+```powershell
+# PowerShell, dans le dossier map-veille
+$env:MAP_ADMIN_MOT_DE_PASSE = "un-mot-de-passe-long"
+uv run uvicorn serveur.app:app --reload
+```
+```bash
+# Linux ou Git Bash
+MAP_ADMIN_MOT_DE_PASSE="un-mot-de-passe-long" uv run uvicorn serveur.app:app --reload
+```
+
+Le mot de passe n'est jamais écrit dans le code ni dans Git. En production, le site doit être servi en **HTTPS**, sinon le mot de passe circule en clair sur le réseau.
+
+Les mêmes actions existent en ligne de commande avec `collecteur/admin.py` (voir plus haut).
 
 ## Installation avec uv
 
@@ -131,7 +153,7 @@ Un code de zone ou de thème inconnu renvoie une erreur 422. Si la base n'existe
 
 Le site a maintenant besoin d'un **serveur qui exécute Python** : GitHub Pages, qui ne sert que des fichiers statiques, ne convient plus. Il faut :
 
-1. **Le serveur web**, lancé en permanence :
+1. **Le serveur web**, lancé en permanence, avec la variable `MAP_ADMIN_MOT_DE_PASSE` définie pour activer l'administration :
    ```bash
    uv run uvicorn serveur.app:app --host 0.0.0.0 --port 8000
    ```
@@ -166,7 +188,6 @@ Codes des thèmes : `def` Conflits et défense, `dip` Diplomatie et RI, `eco` É
 ## Points à valider (lot LT3)
 
 - Les adresses des flux et les conditions d'utilisation de chaque source (C03, C04).
-- La liste `domaines_gdelt` des médias jugés fiables.
 - Les listes de mots-clés : les enrichir à partir de `admin.py a-trier` après quelques jours de collecte.
 - Les cas limites de zones : la Turquie et le Soudan sont classés en Moyen-Orient et Afrique du Nord, le Groenland en Europe.
 - Le thème par défaut des rapports ReliefWeb (`theme_defaut`, actuellement Diplomatie et RI).

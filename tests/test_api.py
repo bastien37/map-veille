@@ -29,19 +29,19 @@ def test_referentiel(client):
 
 def test_synthese(client):
     r = client.get("/api/synthese").json()
-    assert r["total"] == 6
-    assert r["zones"]["asi"] == {"total": 2, "nouveaux": 2}
+    assert r["total"] == 3
+    assert r["zones"]["asi"] == {"total": 1, "nouveaux": 1}
     assert client.get("/api/synthese", params={"theme": "cli"}).json()["total"] == 3
 
 
 def test_articles_filtres_et_pagination(client):
     r = client.get("/api/articles", params={"zone": "asi"}).json()
-    assert r["total"] == 2 and {a["zone"] for a in r["articles"]} == {"asi"}
+    assert r["total"] == 1 and {a["zone"] for a in r["articles"]} == {"asi"}
     assert all(a["nouveau"] is True for a in r["articles"])
     dates = [a["date"] for a in client.get("/api/articles").json()["articles"]]
     assert dates == sorted(dates, reverse=True)
-    page2 = client.get("/api/articles", params={"limite": 4, "decalage": 4}).json()
-    assert len(page2["articles"]) == 2 and page2["total"] == 6
+    page2 = client.get("/api/articles", params={"limite": 2, "decalage": 2}).json()
+    assert len(page2["articles"]) == 1 and page2["total"] == 3
 
 
 def test_codes_inconnus_refuses(client):
