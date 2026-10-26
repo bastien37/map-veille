@@ -1,0 +1,5 @@
+{"type":"FeatureCollection","features":[
+{"type":"Feature","geometry":{"type":"Point","coordinates":[125.6,11.2]},"properties":{"eventtype":"TC","eventid":1001234,"eventname":"MELOR","name":"Tropical Cyclone MELOR-26","alertlevel":"Red","country":"Philippines","iso3":"PHL","fromdate":"2026-10-22T00:00:00","todate":"2026-10-25T12:00:00","severitydata":{"severity":185,"severitytext":"Vents maximaux 185 km/h","severityunit":"km/h"},"url":{"report":"https://www.gdacs.org/report.aspx?eventid=1001234&eventtype=TC"}}},
+{"type":"Feature","geometry":{"type":"Point","coordinates":[27.1,38.4]},"properties":{"eventtype":"EQ","eventid":1500999,"eventname":"","alertlevel":"Orange","country":"Turkey","iso3":"TUR","fromdate":"2026-10-24T03:12:00","todate":"2026-10-24T03:12:00","severitydata":{"severitytext":"Magnitude 6.4M, profondeur 10 km"}}},
+{"type":"Feature","geometry":{"type":"Point","coordinates":[0,0]},"properties":{"eventtype":"FL","eventid":1102000,"alertlevel":"Orange","country":"","iso3":"","affectedcountries":[{"iso3":"NGA","countryname":"Nigeria"}],"fromdate":"2026-10-20T00:00:00"}}
+]}

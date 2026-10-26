@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Test Atom</title>
+<entry><title>Mali : la junte annonce un nouveau gouvernement</title><link href="https://exemple.test/b1"/><updated>2026-10-25T14:00:00Z</updated><summary>Bamako</summary></entry>
+<entry><title>Iran et Arabie saoudite : reprise des pourparlers à Doha</title><link href="https://exemple.test/b2"/><published>2026-10-24T07:30:00Z</published></entry>
+<entry><title>Lancement d'un satellite chinois depuis Jiuquan</title><link href="https://exemple.test/b3"/><updated>2026-10-21T03:00:00Z</updated></entry>
+</feed>

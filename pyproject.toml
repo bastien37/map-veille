@@ -1,0 +1,23 @@
+[project]
+name = "map-veille"
+version = "0.2.0"
+description = "MAP – Monitoring de l'Actualité Planétaire : collecte et tri des actualités internationales (projet pluridisciplinaire EAE)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.162.0",
+    "feedparser>=6.0.14",
+    "uvicorn>=0.54.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.14.0",
+    "pytest>=9.1.1",
+]
