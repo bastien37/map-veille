@@ -38,17 +38,20 @@ C'est le volume cible : 100 flux sur 30 jours.
 
 | route | avant | après | |
 |---|---|---|---|
-| `/api/referentiel` | 3,9 ms · **87,6 Kio** | 2,6 ms · **0,8 Kio** | −99 % de poids |
-| `/api/synthese` | **952,8 ms** | **75,2 ms** | 12,7× |
-| `/api/synthese?theme` | 882,1 ms | 38,3 ms | 23× |
-| `/api/articles` (150) | **427,6 ms** | **28,1 ms** | 15× |
-| `/api/articles` filtré | 411,7 ms | 13,0 ms | 32× |
-| `/api/articles` page 10 | 435,7 ms | 32,5 ms | 13× |
-| `/api/collectes` | 3,0 ms | 3,0 ms | — |
-| page HTML | 2,7 ms | 4,3 ms | compression |
+| `/api/referentiel` | 3,9 ms · **87,6 Kio** | 3,1 ms · **1,0 Kio** | −99 % de poids |
+| `/api/synthese` | **952,8 ms** | **75,9 ms** | 12,6× |
+| `/api/synthese?theme` | 882,1 ms | 32,4 ms | 27× |
+| `/api/articles` (150) | **427,6 ms** | **28,3 ms** | 15× |
+| `/api/articles` filtré | 411,7 ms | 12,4 ms | 33× |
+| `/api/articles` page 10 | 435,7 ms | 30,7 ms | 14× |
+| `/api/articles?langue=fr` | route nouvelle | 33,3 ms | |
+| `/api/evenements` (monde) | route nouvelle | 46,3 ms | |
+| `/api/evenements?langue=fr` | route nouvelle | 53,6 ms | |
+| `/api/collectes` | 3,0 ms | 2,6 ms | — |
+| page HTML | 2,7 ms | 4,7 ms | compression |
 
 Objectif « API sous 100 ms au 95ᵉ centile » : **atteint sur toutes les routes**, la plus
-lente étant à 75,2 ms.
+lente étant à 75,9 ms.
 
 À 50 000 articles (≈ 40 flux), tout est largement en dessous : synthèse 20,4 ms, fil
 15,4 ms.
@@ -64,6 +67,10 @@ Ce qui a produit ces gains, dans l'ordre :
    complet.
 5. **Le référentiel construit, sérialisé et compressé une seule fois**, et débarrassé des
    87 Kio de tracé SVG.
+6. **Un index couvrant complet sur `evenements`** pour la carte, `langues` comprise : le
+   filtre par langue y est un `instr()` sur une colonne de la table, qui sans cela force
+   une lecture ligne à ligne. 111 → 25 ms sur la requête, 156 → 54 ms sur la route, et la
+   carte sans filtre y gagne aussi (58 → 46 ms). Coût : 1,8 Mio d'index.
 
 ### Deux régressions trouvées et corrigées pendant cette phase
 
@@ -115,7 +122,7 @@ ces 60 Kio ne partent qu'à la première ouverture de la carte.
 | Regroupement en événements | 14 paires de manchettes annotées | 6 regroupements sur 7, **0 fusion à tort** |
 | Équivalence du nouveau tri | comparaison avec une implémentation de référence naïve | **identique**, sur un corpus de cas limites et sur tous les flux de test |
 | Accessibilité | contrastes, clavier, structure, 375 px | **tous les contrôles passent**, contraste minimal 4,69 : 1 |
-| Tests | `uv run pytest` | **61 → 336** |
+| Tests | `uv run pytest` | **61 → 355** |
 
 La precision de 100 % porte sur un corpus petit, écrit pour l'occasion : c'est un filet
 anti-régression, pas une preuve de justesse sur le terrain. Le vrai juge sera la première
@@ -129,7 +136,7 @@ qu'un cas réel est mal traité.
 | Objectif | Visé | Mesuré | |
 |---|---|---|---|
 | Premier affichage | < 1 s | 87 ms en local | atteint |
-| API | < 100 ms au p95 | 75,2 ms au pire, à 200 000 articles | atteint |
+| API | < 100 ms au p95 | 75,9 ms au pire, à 200 000 articles | atteint |
 | Ingestion de 100 flux | < 30 s | 12,2 s au premier passage, 4,3 s en régime | atteint |
 
 ---

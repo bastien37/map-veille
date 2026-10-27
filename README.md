@@ -133,6 +133,41 @@ Vérifier ce que la configuration a produit :
 uv run collecteur/admin.py config
 ```
 
+### Vérifier que les flux répondent
+
+Une adresse de flux se devine mal, et une source muette ne se remarque qu'au bout de
+quelques collectes. Après chaque ajout dans `config/flux.json` :
+
+```bash
+uv run collecteur/admin.py verifier-flux            # les sources actives
+uv run collecteur/admin.py verifier-flux --toutes   # y compris celles qui sont coupées
+uv run collecteur/admin.py verifier-flux --nom ifri
+```
+
+La commande interroge chaque source en parallèle **sans rien enregistrer** et affiche, pour
+chacune, `ok` avec le nombre d'articles et la date du plus récent, `vide` si elle répond sans
+rien d'exploitable, ou `NON` avec l'erreur. Les sources à revoir sont rappelées à la fin avec
+leur adresse.
+
+### Le thème « Géopolitique et analyses stratégiques »
+
+`geo` rassemble 16 flux d'instituts et de revues — IFRI, IRSEM, Le Grand Continent, Revue
+Défense Nationale, Le Rubicon, Revue Conflits, Diploweb, Institut Montaigne, Fondation Robert
+Schuman, Areion24.news, The National Interest, War on the Rocks, ECFR, Carnegie Endowment,
+Atlantic Council, Lowy Institute. Onze en français, cinq en anglais, interrogés toutes les
+six heures : ces sources publient quelques fois par semaine, pas toutes les heures.
+
+Ses mots-clés visent le **registre d'analyse** (« rivalité systémique », « multipolaire »,
+« autonomie stratégique », « puissance »), pas les faits : une frappe de missile reste dans
+`def`, une visite d'ambassadeur dans `dip`. Un test le vérifie
+(`tests/test_config.py::test_les_mots_cles_geo_ne_devorent_pas_les_autres_themes`).
+
+> ⚠️ **Aucune de ces 16 adresses n'a pu être testée** depuis l'environnement où elles ont été
+> ajoutées : le réseau extérieur n'y est pas joignable. Elles ont été écrites d'après les
+> conventions habituelles (`/feed/` pour les sites WordPress), et chacune porte une note le
+> disant dans `config/flux.json`. **Lancer `verifier-flux` avant la mise en production** et
+> corriger ou retirer ce qui ne répond pas.
+
 **Un nouveau type d'API** demande du code : écrire `source_xxx(s, hors_ligne, …)` dans
 `collect.py`, l'appeler depuis `collecter_source()`, et ajouter le type dans `TYPES_SOURCES`
 et dans la contrainte `CHECK` de la table `sources` (`base.py`). Le tri, la localisation, le
@@ -197,6 +232,14 @@ manchettes annotées à la main. Ils penchent volontairement du côté de la sé
 réunir deux faits distincts est pire que les laisser côte à côte, car le lecteur ne voit
 alors plus qu'un point là où il se passe deux choses.
 
+**Deux langues ne se rejoignent que par les mots qu'elles partagent.** « Inondations
+meurtrières à Lagos » et « Deadly floods in Lagos » restent deux points au même endroit : la
+ressemblance se mesure sur des mots, et la traduction n'en laisse aucun. Quand les titres
+partagent un nom propre ou une date — « Sommet d'Oslo 2026 » et « Oslo 2026 summit » — le
+regroupement a lieu, et l'événement porte alors ses deux langues. Les réunir dans tous les
+cas demanderait de la traduction ou des plongements multilingues, hors du périmètre de ce
+projet ; le filtre par langue est la façon de n'en voir qu'un.
+
 > **Changement par rapport à la version précédente.** Un deuxième article portant le même
 > titre était auparavant *jeté* — sa source était perdue. Il est désormais conservé et
 > rattaché au même événement. Le fil rend une ligne par événement, avec `nb_sources` ;
@@ -205,12 +248,12 @@ alors plus qu'un point là où il se passe deux choses.
 ## La base de données
 
 `donnees/map.sqlite` est créée au premier lancement et migrée automatiquement. Le schéma est
-dans `collecteur/base.py` (version 9).
+dans `collecteur/base.py` (version 12).
 
 | Table ou vue | Contenu |
 |---|---|
-| `articles` | Titre, source, date, lien, zone, thème, **position**, événement, correction manuelle, masquage |
-| `evenements` | Un fait = une ligne : titre, lieu, position, période, nombre de sources publiables |
+| `articles` | Titre, source, date, lien, zone, thème, **langue**, **position**, événement, correction manuelle, masquage |
+| `evenements` | Un fait = une ligne : titre, lieu, position, période, nombre de sources publiables, langues présentes |
 | `themes`, `zones` | Référentiels. `themes` vient de `config/themes.json` |
 | `sources` | Les sources : état du cache conditionnel, disjoncteur, langue, fréquence, origine |
 | `lieux_geocodes` | Cache de géocodage, succès et échecs |
@@ -223,6 +266,7 @@ Outil en ligne de commande :
 ```bash
 uv run collecteur/admin.py stats      # chiffres par zone et thème, dernières collectes
 uv run collecteur/admin.py config     # thèmes et sources tels que la configuration les a posés
+uv run collecteur/admin.py verifier-flux   # quelles sources répondent vraiment
 uv run collecteur/admin.py a-trier    # articles non classés, avec leur numéro
 uv run collecteur/admin.py classer 42 asi def
 uv run collecteur/admin.py chercher "Taïwan"
@@ -235,24 +279,30 @@ Un article classé à la main n'est plus jamais modifié par le collecteur.
 | Route | Paramètres | Réponse |
 |---|---|---|
 | `GET /api/referentiel` | – | Zones, thèmes actifs, réglages de la carte, durée du repère « Nouveau » |
-| `GET /api/synthese` | `theme`, `themes`, `jours` | Comptages par zone, date de la dernière collecte, sources |
-| `GET /api/articles` | `zone`, `theme`, `themes`, `jours`, `limite`, `decalage`, `grouper` | Le fil, une ligne par événement par défaut |
-| `GET /api/evenements` | `theme`, `themes`, `zone`, `jours`, `bbox`, `limite` | Les points de la carte, les plus suivis d'abord |
+| `GET /api/synthese` | `theme`, `themes`, `langue`, `jours`, `zones` | Total, date de la dernière collecte, sources ; comptages par zone si `zones=1` |
+| `GET /api/articles` | `zone`, `theme`, `themes`, `langue`, `jours`, `limite`, `decalage`, `grouper` | Le fil, une ligne par événement par défaut |
+| `GET /api/evenements` | `theme`, `themes`, `zone`, `langue`, `jours`, `bbox`, `limite` | Les points de la carte, les plus suivis d'abord |
 | `GET /api/evenements/{id}` | – | Un événement et **toutes ses sources** |
 | `GET /api/direct` | – | Flux Server-Sent Events : signale qu'une collecte a eu lieu |
 | `GET /api/collectes` | `limite` | Journal des collectes et état de chaque source |
 
 `themes` accepte une liste séparée par des virgules. `bbox` s'écrit `ouest,sud,est,nord` en
-degrés et accepte le passage de l'antiméridien. Un code inconnu renvoie 422 ; si la base
-n'existe pas encore, 503.
+degrés et accepte le passage de l'antiméridien. `langue` vaut `fr`, `en`, ou rien (ou
+`toutes`) pour ne pas filtrer. Un code inconnu renvoie 422 ; si la base n'existe pas
+encore, 503.
+
+Sur la carte, `langue` garde les événements dont **au moins une** source est dans cette
+langue ; sur le fil, l'article mis en avant est alors choisi dans cette langue, pour ne pas
+afficher un titre anglais à qui a demandé du français.
 
 Les réponses sont compressées (gzip) et portent `Cache-Control` et `ETag` : le référentiel est
 gardé une heure, le fil une minute, et un navigateur à jour reçoit `304`.
 
 ## Le site
 
-Deux vues — **Carte** et **Liste seule** — un filtre de période, et des thèmes que le visiteur
-coche à sa guise (son choix est retenu localement). Chaque thème a sa page : `/theme/eco`,
+Deux vues — **Carte** et **Liste seule** — un filtre de période, un filtre de langue
+(Toutes / Français / Anglais) et des thèmes que le visiteur coche à sa guise (ses choix sont
+retenus localement). Chaque thème a sa page : `/theme/eco`,
 adresse partageable, sans rechargement.
 
 Leaflet et Leaflet.markercluster sont **servis par le site** (`site/vendor/`, licences
@@ -402,7 +452,9 @@ Les thèmes ne sont plus codés en dur : voir `config/themes.json`.
 
 ## Points à valider (lot LT3)
 
-- Les adresses des flux et les conditions d'utilisation de chaque source (C03, C04).
+- **Les 16 adresses du thème `geo`, jamais testées** : lancer
+  `uv run collecteur/admin.py verifier-flux` et corriger ce qui ne répond pas.
+- Les adresses des autres flux et les conditions d'utilisation de chaque source (C03, C04).
 - Les mots-clés : les enrichir à partir de `admin.py a-trier` après quelques jours.
 - Les cas limites de zones : la Turquie et le Soudan sont en Moyen-Orient et Afrique du Nord,
   le Groenland en Europe.
