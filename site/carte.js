@@ -7,7 +7,8 @@
 //   - on ne demande que ce que la carte montre (bbox + période + thème), jamais la planète ;
 //   - un événement = un marqueur, quel que soit le nombre de médias qui en parlent.
 
-const VENDOR = "vendor/";
+let RACINE = "/";                // racine du site, transmise par la page
+const vendor = () => RACINE + "vendor/";
 let L = null;                 // Leaflet, une fois chargé
 let carte = null, agregats = null, calqueTuiles = null;
 let requete = null;           // AbortController de la requête en cours
@@ -45,16 +46,16 @@ function ajouterJs(src) {
 
 async function chargerLeaflet() {
   if (L) return L;
-  await Promise.all([ajouterCss(VENDOR + "leaflet.css"),
-                     ajouterCss(VENDOR + "MarkerCluster.css"),
-                     ajouterCss(VENDOR + "MarkerCluster.Default.css")]);
-  await ajouterJs(VENDOR + "leaflet.js");
-  await ajouterJs(VENDOR + "leaflet.markercluster.js");
+  await Promise.all([ajouterCss(vendor() + "leaflet.css"),
+                     ajouterCss(vendor() + "MarkerCluster.css"),
+                     ajouterCss(vendor() + "MarkerCluster.Default.css")]);
+  await ajouterJs(vendor() + "leaflet.js");
+  await ajouterJs(vendor() + "leaflet.markercluster.js");
   L = window.L;
   if (!L) throw new Error("Leaflet n'a pas pu être chargé");
   // Leaflet cherche ses icônes à côté de son propre fichier : on le lui dit explicitement,
   // sinon les marqueurs sont invisibles.
-  L.Icon.Default.prototype.options.imagePath = VENDOR + "images/";
+  L.Icon.Default.prototype.options.imagePath = vendor() + "images/";
   return L;
 }
 
@@ -63,6 +64,7 @@ async function chargerLeaflet() {
 // ---------------------------------------------------------------------------
 export async function creer(conteneur, conf, options = {}) {
   config = conf;
+  RACINE = options.racine || RACINE;
   surSelection = options.surSelection || (() => {});
   await chargerLeaflet();
   if (carte) return carte;
@@ -118,7 +120,7 @@ export function invalider() {
   if (carte) carte.invalidateSize();
 }
 
-let filtres = { theme: null, jours: 30 };
+let filtres = { themes: null, jours: 30 };
 
 export function appliquerFiltres(nouveaux) {
   filtres = { ...filtres, ...nouveaux };
@@ -138,10 +140,10 @@ export async function rafraichir() {
   requete = new AbortController();
   const params = new URLSearchParams({ bbox: bbox(), jours: filtres.jours,
                                        limite: config.points_max || 600 });
-  if (filtres.theme) params.set("theme", filtres.theme);
+  if (filtres.themes) params.set("themes", filtres.themes);
   let d;
   try {
-    const r = await fetch(`api/evenements?${params}`, { signal: requete.signal });
+    const r = await fetch(`${RACINE}api/evenements?${params}`, { signal: requete.signal });
     if (!r.ok) throw new Error("HTTP " + r.status);
     d = await r.json();
   } catch (e) {
@@ -186,7 +188,7 @@ const dateCourte = d => new Date(d).toLocaleString("fr-FR",
   { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 export async function chargerEvenement(id) {
-  const r = await fetch(`api/evenements/${encodeURIComponent(id)}`);
+  const r = await fetch(`${RACINE}api/evenements/${encodeURIComponent(id)}`);
   if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
 }

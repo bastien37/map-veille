@@ -63,7 +63,7 @@ def test_base_absente(tmp_path, monkeypatch):
 
 def test_front_sans_donnees(client):
     page = client.get("/")
-    assert page.status_code == 200 and 'const API="api"' in page.text
+    assert page.status_code == 200 and 'const API = RACINE + "api"' in page.text
     for interdit in ("MAP_DATA", "data.json", "Conflits et défense", "Europe"):
         assert interdit not in page.text
 
@@ -166,7 +166,7 @@ def test_la_carte_est_chargee_a_la_demande(client):
     page = client.get("/").text
     assert "vendor/leaflet.js" not in page
     assert 'src="carte.js"' not in page and "<script src=" not in page
-    assert 'await import("./carte.js")' in page
+    assert "await import(`${RACINE}carte.js`)" in page
 
 
 def test_le_referentiel_porte_la_configuration_de_la_carte(client):
@@ -175,3 +175,66 @@ def test_le_referentiel_porte_la_configuration_de_la_carte(client):
     assert "OpenStreetMap" in carte["tuiles"]["attribution"]   # citation obligatoire
     assert carte["vue_initiale"]["zoom"] >= 1 and carte["points_max"] > 0
     assert "_commentaire" not in carte
+
+
+# ---------- thèmes choisis par le visiteur, pages par thème ----------
+def test_plusieurs_themes_a_la_fois(client):
+    un = client.get("/api/articles", params={"themes": "cli"}).json()["total"]
+    deux = client.get("/api/articles", params={"themes": "cli,def"}).json()["total"]
+    tous = client.get("/api/articles").json()["total"]
+    assert un <= deux <= tous
+
+
+def test_themes_equivaut_a_theme_pour_un_seul_code(client):
+    a = client.get("/api/articles", params={"theme": "cli"}).json()
+    b = client.get("/api/articles", params={"themes": "cli"}).json()
+    assert a["total"] == b["total"]
+
+
+@pytest.mark.parametrize("route", ["/api/articles", "/api/synthese", "/api/evenements"])
+def test_theme_inconnu_dans_la_liste_refuse(client, route):
+    assert client.get(route, params={"themes": "cli,xyz"}).status_code == 422
+    assert client.get(route, params={"themes": "cli"}).status_code == 200
+    assert client.get(route, params={"themes": ""}).status_code == 200   # vide = tous
+
+
+def test_doublons_dans_la_liste_de_themes(client):
+    a = client.get("/api/articles", params={"themes": "cli,cli,cli"}).json()["total"]
+    assert a == client.get("/api/articles", params={"themes": "cli"}).json()["total"]
+
+
+def test_page_par_theme(client):
+    r = client.get("/theme/cli")
+    assert r.status_code == 200 and 'const API = RACINE + "api"' in r.text
+    assert client.get("/theme/inconnu").status_code == 404
+
+
+def test_le_front_sait_ou_il_est_servi(client):
+    """La page est rendue telle quelle sur « / » comme sur « /theme/cli » : les chemins
+    relatifs doivent être calculés, sinon « api/articles » deviendrait « /theme/api/… »."""
+    page = client.get("/").text
+    assert "location.pathname.replace(/theme" in page
+    assert '"map.themes"' in page          # le choix du visiteur est mémorisé
+
+
+# ---------- mises à jour en quasi temps réel ----------
+def test_flux_direct(client):
+    with client.stream("GET", "/api/direct") as r:
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/event-stream")
+        assert r.headers["cache-control"] == "no-store"
+        # un flux d'événements ne doit surtout pas être compressé : il serait tamponné
+        assert r.headers.get("content-encoding") == "identity"
+        premier = ""
+        for morceau in r.iter_text():
+            premier += morceau
+            if "\n\n" in premier:
+                break
+    assert premier.startswith("event: bonjour")
+    assert "mise_a_jour" in premier
+
+
+def test_le_front_ecoute_le_direct_et_sait_se_replier(client):
+    page = client.get("/").text
+    assert "new EventSource" in page
+    assert "replierSurInterrogation" in page   # si le flux ne passe pas

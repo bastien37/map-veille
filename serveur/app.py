@@ -10,6 +10,7 @@ Lancer :
 
 Documentation interactive de l'API : http://localhost:8000/docs
 """
+import asyncio
 import gzip
 import hashlib
 import json
@@ -22,8 +23,9 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE / "collecteur"))
@@ -113,29 +115,51 @@ def verifier(zone: Optional[str], theme: Optional[str]):
                                  f"Codes valides : {', '.join(base.THEMES_ACTIFS)}")
 
 
-def filtre_sql(zone, theme, jours, prefixe: str = "", colonne_date: str = "date_pub"):
-    """Clause WHERE commune : période (D05), zone et thème.
+def themes_demandes(theme: Optional[str], themes: Optional[str]) -> list:
+    """Codes de thèmes retenus pour une requête.
+
+    `theme` garde l'ancien usage, un seul thème. `themes` accepte une liste séparée par des
+    virgules : c'est ce que le visiteur coche sur le site, et une page de thème n'est qu'un
+    cas particulier à un seul code. Rien de demandé = tous les thèmes actifs.
+    """
+    if themes:
+        voulus = [c.strip() for c in themes.split(",") if c.strip()]
+        inconnus = [c for c in voulus if c not in base.THEMES_ACTIFS]
+        if inconnus:
+            raise HTTPException(422, f"Thème inconnu ou désactivé : {', '.join(inconnus)}. "
+                                     f"Codes valides : {', '.join(base.THEMES_ACTIFS)}")
+        if voulus:
+            return list(dict.fromkeys(voulus))
+    verifier(None, theme)
+    return [theme] if theme else list(base.THEMES_ACTIFS)
+
+
+def filtre_sql(zone, theme, jours, prefixe: str = "", colonne_date: str = "date_pub",
+               themes: Optional[list] = None):
+    """Clause WHERE commune : période (D05), zone et thème(s).
 
     `prefixe` et `colonne_date` permettent d'appliquer le même filtre à la table des
     articles (date_pub) comme à celle des événements (e.date_fin), sans récrire la règle
     deux fois ni bricoler la chaîne SQL après coup.
 
-    Le site ne montre que les thèmes actifs de config/themes.json. La liste est injectée
-    telle quelle — ce sont des codes validés à la lecture de la configuration, jamais une
-    saisie d'utilisateur — pour que le planificateur garde son index, ce qu'une sous-requête
-    sur la table themes lui ferait perdre.
+    La liste de thèmes est injectée telle quelle dans le SQL — ce sont des codes vérifiés
+    contre config/themes.json, jamais une saisie brute — pour que le planificateur garde
+    son index, ce qu'une sous-requête sur la table themes lui ferait perdre.
     """
     depuis = (maintenant() - timedelta(days=jours)).isoformat()
     clauses, params = [f"{prefixe}{colonne_date} >= ?"], [depuis]
     if zone:
         clauses.append(f"{prefixe}zone = ?")
         params.append(zone)
-    if theme:
+    codes = themes if themes is not None else ([theme] if theme else list(base.THEMES_ACTIFS))
+    inconnus = [c for c in codes if c not in base.THEMES]
+    if inconnus:   # garde-fou : rien d'autre que des codes connus n'entre dans la requête
+        raise HTTPException(422, f"Thème inconnu : {', '.join(inconnus)}")
+    if len(codes) == 1:
         clauses.append(f"{prefixe}theme = ?")
-        params.append(theme)
+        params.append(codes[0])
     else:
-        clauses.append(f"{prefixe}theme IN (%s)"
-                       % ", ".join("'%s'" % c for c in base.THEMES_ACTIFS))
+        clauses.append(f"{prefixe}theme IN (%s)" % ", ".join("'%s'" % c for c in codes))
     return " AND ".join(clauses), params
 
 
@@ -173,10 +197,11 @@ def referentiel(requete: Request, cx: sqlite3.Connection = Depends(connexion)):
 
 
 @app.get("/api/synthese", summary="Nombre d'articles et de nouveautés par zone (coloration de la carte)")
-def synthese(requete: Request, theme: Optional[str] = None, jours: int = Query(30, ge=1, le=365),
+def synthese(requete: Request, theme: Optional[str] = None, themes: Optional[str] = None,
+             jours: int = Query(30, ge=1, le=365),
              cx: sqlite3.Connection = Depends(connexion)):
-    verifier(None, theme)
-    where, params = filtre_sql(None, theme, jours)
+    codes = themes_demandes(theme, themes)
+    where, params = filtre_sql(None, None, jours, themes=codes)
     seuil_nouveau = (maintenant() - base.DUREE_NOUVEAU).isoformat()
     lignes = cx.execute(
         f"""SELECT zone, COUNT(*) AS total, SUM(ajout >= ?) AS nouveaux
@@ -198,7 +223,7 @@ def synthese(requete: Request, theme: Optional[str] = None, jours: int = Query(3
 
 @app.get("/api/articles", summary="Fil d'actualité filtré, du plus récent au plus ancien")
 def articles(requete: Request, zone: Optional[str] = None, theme: Optional[str] = None,
-             jours: int = Query(30, ge=1, le=365),
+             themes: Optional[str] = None, jours: int = Query(30, ge=1, le=365),
              limite: int = Query(150, ge=1, le=500), decalage: int = Query(0, ge=0),
              grouper: bool = Query(True, description="une ligne par événement plutôt que par article"),
              cx: sqlite3.Connection = Depends(connexion)):
@@ -208,8 +233,9 @@ def articles(requete: Request, zone: Optional[str] = None, theme: Optional[str] 
     pas la liste cinq fois, et `nb_sources` dit combien de médias la relaient. `grouper=false`
     rend la liste article par article, comme avant le regroupement.
     """
-    verifier(zone, theme)
-    where, params = filtre_sql(zone, theme, jours)
+    verifier(zone, None)
+    codes = themes_demandes(theme, themes)
+    where, params = filtre_sql(zone, None, jours, themes=codes)
     seuil_nouveau = (maintenant() - base.DUREE_NOUVEAU).isoformat()
     total, nouveaux = cx.execute(f"SELECT COUNT(*), COALESCE(SUM(ajout >= ?), 0) FROM fil WHERE {where}",
                                  [seuil_nouveau, *params]).fetchone()
@@ -228,7 +254,7 @@ def articles(requete: Request, zone: Optional[str] = None, theme: Optional[str] 
     # articles, puis on va chercher l'article le plus récent de chacun pour le titre, la
     # source et le lien affichés. Une fenêtre glissante sur tous les articles donnerait le
     # même résultat mais devrait tous les parcourir.
-    ou_evt, p_evt = filtre_sql(zone, theme, jours, "e.", "date_fin")
+    ou_evt, p_evt = filtre_sql(zone, None, jours, "e.", "date_fin", themes=codes)
     # EXISTS dans la clause WHERE, et pas un filtre après coup : un événement dont toutes
     # les sources ont été masquées ne doit ni être compté dans le total, ni occuper une
     # place dans la page — sinon la pagination renverrait des pages trop courtes.
@@ -283,7 +309,8 @@ def bbox_sql(bbox: Optional[str], prefixe: str = ""):
 
 
 @app.get("/api/evenements", summary="Points de la carte : un événement = un point, plusieurs sources")
-def evenements(requete: Request, theme: Optional[str] = None, zone: Optional[str] = None,
+def evenements(requete: Request, theme: Optional[str] = None, themes: Optional[str] = None,
+               zone: Optional[str] = None,
                jours: int = Query(30, ge=1, le=365), bbox: Optional[str] = None,
                limite: int = Query(500, ge=1, le=2000),
                cx: sqlite3.Connection = Depends(connexion)):
@@ -293,8 +320,9 @@ def evenements(requete: Request, theme: Optional[str] = None, zone: Optional[str
     même endroit : il ne fait qu'un point sur la carte. Les plus suivis (le plus de sources)
     sont renvoyés en premier, pour qu'un plafond de résultats ne coupe pas l'essentiel.
     """
-    verifier(zone, theme)
-    where, params = filtre_sql(zone, theme, jours, "e.", "date_fin")
+    verifier(zone, None)
+    codes = themes_demandes(theme, themes)
+    where, params = filtre_sql(zone, None, jours, "e.", "date_fin", themes=codes)
     where += " AND e.lat IS NOT NULL"
     sql_bbox, p_bbox = bbox_sql(bbox, "e.")
     where += sql_bbox
@@ -327,6 +355,64 @@ def evenement(evenement_id: int, requete: Request, cx: sqlite3.Connection = Depe
                       CACHE_FIL, requete)
 
 
+# ---------------------------------------------------------------------------
+# Mises à jour en quasi temps réel
+# ---------------------------------------------------------------------------
+INTERVALLE_DIRECT = 10        # secondes entre deux vérifications côté serveur
+BATTEMENT_DIRECT = 25         # secondes : un commentaire SSE pour tenir la connexion ouverte
+
+
+def _empreinte(chemin: Path) -> tuple:
+    """Ce qui permet de dire « quelque chose a changé » : la dernière collecte terminée et
+    le nombre d'articles. Deux lectures indexées, quelques dizaines de microsecondes."""
+    if not chemin.exists():
+        return (None, 0)
+    cx = sqlite3.connect(Path(chemin).resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        fin = cx.execute("SELECT MAX(fin) FROM collectes").fetchone()[0]
+        n = cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+        return (fin, n)
+    finally:
+        cx.close()
+
+
+@app.get("/api/direct", summary="Flux d'événements : signale qu'une collecte a eu lieu")
+async def direct(requete: Request):
+    """Server-Sent Events. Le serveur ne pousse pas les articles, seulement un signal :
+    le navigateur recharge alors ce qu'il affiche, avec ses propres filtres. C'est plus
+    simple qu'un flux de données, et cela évite d'envoyer à chacun ce qu'il ne regarde pas.
+
+    Repli automatique côté navigateur : si EventSource échoue (proxy qui coupe, réseau
+    capricieux), le site repasse à une interrogation légère toutes les deux minutes.
+    """
+    chemin = Path(BASE)
+
+    async def flux():
+        dernier = await run_in_threadpool(_empreinte, chemin)
+        yield f"event: bonjour\ndata: {json.dumps({'mise_a_jour': dernier[0]})}\n\n"
+        depuis_battement = 0.0
+        while not await requete.is_disconnected():
+            await asyncio.sleep(INTERVALLE_DIRECT)
+            depuis_battement += INTERVALLE_DIRECT
+            etat = await run_in_threadpool(_empreinte, chemin)
+            if etat != dernier:
+                dernier = etat
+                yield (f"event: collecte\ndata: "
+                       f"{json.dumps({'mise_a_jour': etat[0], 'articles': etat[1]})}\n\n")
+                depuis_battement = 0.0
+            elif depuis_battement >= BATTEMENT_DIRECT:
+                yield ": battement\n\n"   # garde la connexion vivante à travers les proxys
+                depuis_battement = 0.0
+
+    return StreamingResponse(flux(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",      # nginx ne doit pas tamponner un flux d'événements
+        # le middleware gzip saute les réponses qui déclarent déjà un encodage : sans cela
+        # il tamponnerait le flux et les messages n'arriveraient que par paquets
+        "Content-Encoding": "identity",
+    })
+
+
 @app.get("/api/collectes", summary="Journal des dernières collectes et état des sources")
 def collectes(limite: int = Query(5, ge=1, le=50), cx: sqlite3.Connection = Depends(connexion)):
     sortie = []
@@ -348,6 +434,15 @@ app.include_router(routeur_admin)
 # ---------------------------------------------------------------------------
 # Front (fichiers statiques, sans données)
 # ---------------------------------------------------------------------------
+@app.get("/theme/{code}", include_in_schema=False)
+def page_theme(code: str):
+    """Page d'un thème. Le serveur rend la même page ; c'est le navigateur qui lit l'adresse
+    et pose le filtre. Une adresse par thème se partage et s'ouvre directement."""
+    if code not in base.THEMES_ACTIFS:
+        raise HTTPException(404, f"Thème inconnu : {code}")
+    return FileResponse(SITE / "index.html", headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/", include_in_schema=False)
 def accueil():
     # revalidation systématique : la page est petite, et une version figée dans le cache du

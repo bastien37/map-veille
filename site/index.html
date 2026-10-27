@@ -44,6 +44,11 @@ h1 span{font-weight:500;color:var(--muted);font-size:1.15rem;letter-spacing:.04e
 .chip{font:inherit;font-size:.85rem;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:5px 11px;border-radius:999px;cursor:pointer}
 .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--panel)}
 .chip:focus-visible,.reset:focus-visible{outline:2px solid var(--new);outline-offset:2px}
+.bandeau{margin:0;font-family:var(--display);font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;font-size:.85rem;color:var(--accent)}
+.lien-theme{font-family:var(--mono);font-size:.68rem;color:var(--muted);text-decoration:underline;
+  text-underline-offset:3px;align-self:center;margin:0 10px 0 -4px}
+.lien-theme:hover,.lien-theme:focus-visible{color:var(--accent)}
 .reset{font:inherit;font-size:.85rem;font-weight:600;background:none;border:none;color:var(--accent);cursor:pointer;padding:5px 4px;margin-left:auto;text-decoration:underline;text-underline-offset:3px}
 .grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:16px;align-items:start}
 .mapbox{background:var(--sea);border:1px solid var(--line);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px;min-width:0}
@@ -117,7 +122,8 @@ footer{font-size:.78rem;color:var(--muted);max-width:75ch}
     <button class="chip" data-jours="30" aria-pressed="true">30 jours</button>
   </div>
 
-  <div class="bar" id="themes"><span class="lbl">Thème</span></div>
+  <div class="bar" id="themes"><span class="lbl">Thèmes</span></div>
+  <p class="bandeau" id="bandeau-theme" hidden></p>
 
   <div class="grid">
     <section class="mapbox" id="mapbox" aria-label="Carte">
@@ -140,17 +146,33 @@ footer{font-size:.78rem;color:var(--muted);max-width:75ch}
 
 <script>
 // Aucune donnée dans ce fichier : zones, thèmes, tracé de la carte et actualités viennent de l'API.
-const API="api";   // même serveur que la page (voir serveur/app.py)
+// Racine du site. La page est servie telle quelle sur « / » comme sur « /theme/eco » :
+// sans cela, « api/articles » deviendrait « /theme/api/articles ». Le calcul marche aussi
+// si le site est installé dans un sous-répertoire.
+const RACINE = location.pathname.replace(/theme\/[a-z0-9]+\/?$/, "");
+const API = RACINE + "api";   // même serveur que la page (voir serveur/app.py)
 const PAS=150;
 // la zone reste en base et dans l'administration, mais ne sert plus de filtre public :
 // la carte à points la remplace (voir bancs/DECISION-phase2.md, § 5)
-let THEMES=[], CARTE=null, fTheme=null, fJours=30, limite=PAS, requete=0;
+let THEMES=[], CARTE=null, fJours=30, limite=PAS, requete=0;
+let fThemes=[];            // thèmes cochés par le visiteur ; vide = tous
+let pageTheme=null;        // code du thème si on est sur /theme/<code>
+const CLE_THEMES="map.themes";
 let vue="points";          // points | zones | liste
 let carte=null;            // module site/carte.js, importé à la première vue « points »
 const $=s=>document.querySelector(s);
 const fmtH=d=>new Date(d).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const tNom=c=>(THEMES.find(t=>t.code===c)||{nom:c}).nom;
+// paramètre « themes » de l'API : la liste cochée, ou rien du tout si elle est vide
+const paramThemes=()=>pageTheme?pageTheme:(fThemes.length?fThemes.join(","):null);
+
+// Mémoire locale des préférences. Peut échouer (navigation privée, stockage bloqué) :
+// le site doit alors marcher pareil, simplement sans se souvenir.
+function lireMemoire(cle, defaut){
+  try{ const v=localStorage.getItem(cle); return v==null?defaut:JSON.parse(v) }catch{ return defaut }
+}
+function ecrireMemoire(cle, valeur){ try{ localStorage.setItem(cle,JSON.stringify(valeur)) }catch{} }
 
 async function api(chemin, params={}){
   const q=new URLSearchParams(Object.entries(params).filter(([,v])=>v!=null&&v!==""));
@@ -162,8 +184,23 @@ async function api(chemin, params={}){
 // ---------- construction depuis le référentiel ----------
 function construire(ref){
   THEMES=ref.themes; CARTE=ref.carte;
-  THEMES.forEach(t=>{const b=document.createElement("button");b.className="chip";b.textContent=t.nom;b.dataset.t=t.code;b.setAttribute("aria-pressed","false");b.onclick=()=>{fTheme=fTheme===t.code?null:t.code;if(carte)carte.appliquerFiltres({theme:fTheme});actualiser()};$("#themes").appendChild(b)});
-  const reset=document.createElement("button");reset.className="reset";reset.textContent="Tout afficher";reset.onclick=()=>{fTheme=null;if(carte)carte.appliquerFiltres({theme:null});actualiser()};$("#themes").appendChild(reset);
+  THEMES.forEach(t=>{
+    const b=document.createElement("button");
+    b.className="chip"; b.textContent=t.nom; b.dataset.t=t.code;
+    b.title=`Afficher ou masquer « ${t.nom} »`;
+    b.onclick=()=>basculerTheme(t.code);
+    $("#themes").appendChild(b);
+    const a=document.createElement("a");
+    a.className="lien-theme"; a.href=`${RACINE}theme/${t.code}`; a.textContent="page";
+    a.title=`Page dédiée au thème « ${t.nom} »`;
+    a.onclick=e=>{e.preventDefault();ouvrirPageTheme(t.code)};
+    $("#themes").appendChild(a);
+  });
+  const reset=document.createElement("button");
+  reset.className="reset"; reset.textContent="Tous les thèmes";
+  reset.onclick=()=>{fThemes=[];ecrireMemoire(CLE_THEMES,fThemes);if(pageTheme)ouvrirPageTheme(null);else majThemes()};
+  $("#themes").appendChild(reset);
+  marquerThemes();
 }
 
 // ---------- bascule carte / liste ----------
@@ -177,10 +214,10 @@ async function setVue(v){
   try{
     if(!carte){
       $("#carte-etat").textContent="Chargement de la carte…";
-      carte=await import("./carte.js");
-      await carte.creer($("#carte-points"), CARTE, {surSelection:ouvrirEvenement});
+      carte=await import(`${RACINE}carte.js`);
+      await carte.creer($("#carte-points"), CARTE, {surSelection:ouvrirEvenement, racine:RACINE});
     }
-    carte.appliquerFiltres({theme:fTheme, jours:fJours});
+    carte.appliquerFiltres({themes:paramThemes(), jours:fJours});
     carte.invalider();     // le conteneur était caché : Leaflet doit remesurer
   }catch(e){
     $("#carte-etat").textContent="La carte n'a pas pu être chargée ; la liste reste disponible.";
@@ -188,9 +225,46 @@ async function setVue(v){
   }
 }
 
+// ---------- thèmes : le visiteur coche ceux qu'il veut, et son choix est gardé ----------
+function basculerTheme(code){
+  if(pageTheme)return ouvrirPageTheme(code===pageTheme?null:code);
+  fThemes = fThemes.includes(code) ? fThemes.filter(c=>c!==code) : [...fThemes, code];
+  ecrireMemoire(CLE_THEMES, fThemes);
+  majThemes();
+}
+function majThemes(){
+  marquerThemes();
+  if(carte)carte.appliquerFiltres({themes:paramThemes()});
+  actualiser();
+}
+function marquerThemes(){
+  document.querySelectorAll("#themes .chip").forEach(b=>{
+    const choisi = pageTheme ? b.dataset.t===pageTheme : fThemes.includes(b.dataset.t);
+    b.setAttribute("aria-pressed", choisi);
+  });
+  const tousVisibles = !pageTheme && !fThemes.length;
+  $("#bandeau-theme").hidden = !pageTheme;
+  if(pageTheme)$("#bandeau-theme").textContent=`Page du thème « ${tNom(pageTheme)} »`;
+  document.title = pageTheme ? `${tNom(pageTheme)} – MAP` : "MAP – Carte de veille";
+  $("#themes .reset").hidden = tousVisibles;
+}
+
+// Page d'un thème : une adresse propre, partageable, sans rechargement.
+function ouvrirPageTheme(code){
+  pageTheme = code;
+  history.pushState({theme:code}, "", code ? `${RACINE}theme/${code}` : RACINE);
+  majThemes();
+}
+addEventListener("popstate", e=>{ pageTheme = e.state?.theme ?? lirePageTheme(); majThemes() });
+function lirePageTheme(){
+  const m = location.pathname.match(/\/theme\/([a-z0-9]+)\/?$/);
+  return m ? m[1] : null;
+}
+
 function setJours(j){
   fJours=j;
   document.querySelectorAll("#vues .chip[data-jours]").forEach(b=>b.setAttribute("aria-pressed",+b.dataset.jours===j));
+  ecrireMemoire("map.jours", j);
   if(carte)carte.appliquerFiltres({jours:j});
   actualiser();
 }
@@ -221,7 +295,6 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#panneau").hidd
 
 // ---------- affichage ----------
 function dessinerEnTete(syn){
-  document.querySelectorAll("#themes .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.t===fTheme));
   $("#maj").textContent=syn.mise_a_jour?fmtH(syn.mise_a_jour):"aucune collecte";
   $("#srcs").textContent=syn.sources.join(", ")||"aucune";
 }
@@ -239,7 +312,9 @@ function bouton(){const reste=totalFil-affiches;return reste>0?`<li class="more"
 
 function dessinerFil(res){
   totalFil=res.total; affiches=res.articles.length;
-  $("#ftitle").textContent=(fTheme?tNom(fTheme):"Toute l'actualité");
+  $("#ftitle").textContent = pageTheme ? tNom(pageTheme)
+    : fThemes.length===1 ? tNom(fThemes[0])
+    : fThemes.length ? `${fThemes.length} thèmes` : "Toute l'actualité";
   $("#fcount").textContent=`${res.total} événement${res.total>1?"s":""} · `
     +`${res.nouveaux} nouveau${res.nouveaux>1?"x":""}`
     +(res.total_articles>res.total?` · ${res.total_articles} articles`:"");
@@ -250,7 +325,7 @@ function dessinerFil(res){
 async function afficherPlus(){
   const b=$("#plus"); if(b){b.disabled=true;b.textContent="Chargement…"}
   try{
-    const res=await api("articles",{theme:fTheme,jours:fJours,limite:PAS,decalage:affiches});
+    const res=await api("articles",{themes:paramThemes(),jours:fJours,limite:PAS,decalage:affiches});
     affiches+=res.articles.length;
     $(".more")?.remove();
     $("#list").insertAdjacentHTML("beforeend",res.articles.map(ligne).join("")+bouton());
@@ -266,19 +341,54 @@ async function actualiser(){
   const n=++requete;
   $("#list").setAttribute("aria-busy","true");
   try{
-    const [syn,res]=await Promise.all([api("synthese",{theme:fTheme,jours:fJours}),
-                                      api("articles",{theme:fTheme,jours:fJours,limite:PAS})]);
+    const [syn,res]=await Promise.all([api("synthese",{themes:paramThemes(),jours:fJours}),
+                                      api("articles",{themes:paramThemes(),jours:fJours,limite:PAS})]);
     if(n!==requete)return;          // une requête plus récente a été lancée entre-temps
     dessinerEnTete(syn); dessinerFil(res);
   }catch(e){ if(n===requete)erreur(e) }
   finally{ $("#list").removeAttribute("aria-busy") }
 }
 
+// ---------- mises à jour sans recharger la page ----------
+// Un signal suffit : le serveur dit « une collecte vient de finir », le navigateur
+// redemande ce qu'il affiche, avec SES filtres. Si le flux d'événements ne passe pas
+// (proxy qui coupe, réseau capricieux), on retombe sur une interrogation légère.
+const PERIODE_REPLI = 120000;
+let replDirect = null;
+
+function suivreEnDirect(){
+  let flux;
+  try{ flux = new EventSource(`${API}/direct`); }catch{ return replierSurInterrogation() }
+  let vivant = false;
+  flux.addEventListener("bonjour", ()=>{ vivant = true; clearInterval(replDirect); replDirect = null });
+  flux.addEventListener("collecte", async e=>{
+    let d={}; try{ d = JSON.parse(e.data) }catch{}
+    $("#maj").textContent = d.mise_a_jour ? fmtH(d.mise_a_jour) : $("#maj").textContent;
+    await actualiser();
+    if(carte)carte.rafraichir();
+  });
+  flux.onerror = ()=>{ if(!vivant) replierSurInterrogation() };
+  // si rien n'arrive dans les 15 premières secondes, le flux ne passe pas
+  setTimeout(()=>{ if(!vivant)replierSurInterrogation() }, 15000);
+}
+
+function replierSurInterrogation(){
+  if(replDirect)return;
+  replDirect = setInterval(()=>{ if(!document.hidden)actualiser() }, PERIODE_REPLI);
+}
+
 (async()=>{
   $("#list").innerHTML='<li class="empty">Chargement des actualités…</li>';
+  pageTheme = lirePageTheme();
+  fThemes = lireMemoire(CLE_THEMES, []);
+  fJours = lireMemoire("map.jours", 30);
   try{ construire(await api("referentiel")); }catch(e){ erreur(e); return; }
+  fThemes = fThemes.filter(c=>THEMES.some(t=>t.code===c));   // un thème peut avoir disparu
+  marquerThemes();
+  document.querySelectorAll("#vues .chip[data-jours]").forEach(b=>b.setAttribute("aria-pressed",+b.dataset.jours===fJours));
   await actualiser();
   setVue("points");
+  suivreEnDirect();
 })();
 </script>
 </body>
