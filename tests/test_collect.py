@@ -8,10 +8,13 @@ import pytest
 
 RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE / "collecteur"))
+import base  # noqa: E402
 import collect  # noqa: E402
 
 TESTS = RACINE / "tests"
-REGLES = json.loads((RACINE / "collecteur" / "regles.json").read_text(encoding="utf-8"))
+# zones : collecteur/regles.json ; thèmes : config/themes.json (chargé par base)
+REGLES = {**json.loads((RACINE / "collecteur" / "regles.json").read_text(encoding="utf-8")),
+          "themes": base.REGLES_THEMES}
 ZONES = collect.compiler(REGLES["zones"])
 THEMES = collect.compiler(REGLES["themes"])
 

@@ -9,6 +9,7 @@ Le front ne contient aucune donnée : il les demande à l'API (serveur/app.py), 
 Module standard sqlite3 : aucune bibliothèque à installer.
 """
 import json
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,6 +17,9 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parent.parent
 BASE = RACINE / "donnees" / "map.sqlite"
 ANCIEN_JSON = RACINE / "site" / "data.json"   # ancien format, lu une seule fois pour la migration
+CONFIG = RACINE / "config"
+THEMES_JSON = CONFIG / "themes.json"
+FLUX_JSON = CONFIG / "flux.json"
 DUREE_FIL = timedelta(days=30)   # D05 : durée de conservation ; au-delà, l'article est supprimé à la collecte
 DUREE_NOUVEAU = timedelta(hours=48)   # F06 : repère « Nouveau »
 
@@ -27,16 +31,61 @@ ZONES = {
     "asi": "Asie et Indo-Pacifique",
     "ame": "Amériques",
 }
-THEMES = {
-    "def": "Conflits et défense",
-    "dip": "Diplomatie et relations internationales",
-    "eco": "Économie et énergie",
-    "tec": "Sciences, technologies et espace",
-    "cli": "Climat et catastrophes naturelles",
-}
 
-VERSION_SCHEMA = 6   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
-                    # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs, pause_jusqu_a
+LANGUES = ("fr", "en")   # langues gérées pour le tri et l'extraction de lieux
+FREQUENCE_DEFAUT = 60    # minutes entre deux interrogations d'une source
+
+
+def lire_config(chemin: Path, cle: str) -> list:
+    """Lit un fichier de configuration et renvoie sa liste. Une erreur de syntaxe doit être
+    lisible : elle bloque toute la veille, autant dire tout de suite quel fichier revoir."""
+    try:
+        d = json.loads(chemin.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Fichier de configuration absent : {chemin}") from None
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{chemin.name} n'est pas un JSON valide : {e}") from None
+    if not isinstance(d.get(cle), list):
+        raise ValueError(f"{chemin.name} doit contenir une liste « {cle} ».")
+    return d[cle]
+
+
+def charger_themes(chemin: Path = None) -> list:
+    """Thèmes déclarés dans config/themes.json, triés par « ordre ».
+    Contrôle les codes : ils servent de clé en base et dans l'API."""
+    themes, vus = [], set()
+    for t in lire_config(chemin or THEMES_JSON, "themes"):
+        code = (t.get("code") or "").strip()
+        if not re.fullmatch(r"[a-z0-9]{2,8}", code):
+            raise ValueError(f"Code de thème invalide : {code!r} (2 à 8 lettres ou chiffres, minuscules).")
+        if code in vus:
+            raise ValueError(f"Le code de thème « {code} » apparaît deux fois.")
+        vus.add(code)
+        nom = (t.get("nom") or "").strip()
+        if not nom:
+            raise ValueError(f"Le thème « {code} » n'a pas de nom.")
+        mots = t.get("mots_cles") or []
+        if not isinstance(mots, list) or not all(isinstance(m, str) for m in mots):
+            raise ValueError(f"Les mots-clés du thème « {code} » doivent être une liste de textes.")
+        themes.append({"code": code, "nom": nom, "actif": bool(t.get("actif", True)),
+                       "ordre": int(t.get("ordre", 10 * (len(themes) + 1))), "mots_cles": mots})
+    if not themes:
+        raise ValueError(f"{(chemin or THEMES_JSON).name} ne déclare aucun thème.")
+    themes.sort(key=lambda t: (t["ordre"], t["code"]))
+    return themes
+
+
+# Thèmes chargés une fois à l'import. THEMES garde la forme {code: nom} de toujours — tous les
+# thèmes déclarés, actifs ou non, pour que les articles déjà classés restent valides. Les
+# thèmes désactivés disparaissent seulement de l'affichage (THEMES_ACTIFS).
+THEMES_DECLARES = charger_themes()
+THEMES = {t["code"]: t["nom"] for t in THEMES_DECLARES}
+THEMES_ACTIFS = [t["code"] for t in THEMES_DECLARES if t["actif"]]
+REGLES_THEMES = {t["code"]: t["mots_cles"] for t in THEMES_DECLARES}
+
+VERSION_SCHEMA = 7   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+                    # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs,
+                    # pause_jusqu_a ; v7 : themes.actif/ordre, sources.langue/frequence/theme/origine
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -45,22 +94,6 @@ TYPES_SOURCES = {
 }
 NIVEAUX_GDACS = ("green", "orange", "red")
 
-# Sources installées à la création de la base (ou à la migration vers v3).
-# Ensuite, la liste se gère uniquement depuis l'administration (onglet Sources).
-SOURCES_INITIALES = [
-    {"nom": "Le Monde", "type": "rss", "url": "https://www.lemonde.fr/international/rss_full.xml", "actif": True},
-    {"nom": "France 24", "type": "rss", "url": "https://www.france24.com/fr/rss", "actif": True},
-    {"nom": "RFI", "type": "rss", "url": "https://www.rfi.fr/fr/rss", "actif": True},
-    {"nom": "franceinfo", "type": "rss", "url": "https://www.francetvinfo.fr/monde.rss", "actif": True},
-    {"nom": "Courrier international", "type": "rss",
-     "url": "https://www.courrierinternational.com/feed/all/rss.xml", "actif": False},
-    {"nom": "GDACS (ONU / Commission européenne)", "type": "gdacs", "actif": True,
-     "parametres": {"niveaux": ["orange", "red"], "jours": 7}, "fichier_test": "tests/gdacs.json",
-     "notes": "Alertes de catastrophes naturelles. Citer « Global Disaster Alert and Coordination System, GDACS »."},
-    {"nom": "ReliefWeb (OCHA)", "type": "reliefweb", "actif": False,
-     "parametres": {"theme_defaut": "dip"}, "fichier_test": "tests/reliefweb.json",
-     "notes": "Nécessite un appname approuvé par ReliefWeb, dans la variable d'environnement RELIEFWEB_APPNAME."},
-]
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS zones (
     code  TEXT PRIMARY KEY,
@@ -68,7 +101,9 @@ CREATE TABLE IF NOT EXISTS zones (
 );
 CREATE TABLE IF NOT EXISTS themes (
     code  TEXT PRIMARY KEY,
-    nom   TEXT NOT NULL
+    nom   TEXT NOT NULL,
+    actif INTEGER NOT NULL DEFAULT 1 CHECK (actif IN (0, 1)),  -- v7 : thème retiré du site
+    ordre INTEGER NOT NULL DEFAULT 0                           -- v7 : ordre d'affichage
 );
 CREATE TABLE IF NOT EXISTS collectes (
     id          INTEGER PRIMARY KEY,
@@ -114,6 +149,12 @@ CREATE TABLE IF NOT EXISTS sources (
     notes        TEXT,                           -- conditions d'utilisation, validation LT3…
     ajout        TEXT NOT NULL,
     maj          TEXT NOT NULL,
+    -- v7 : décrits dans config/flux.json
+    langue            TEXT NOT NULL DEFAULT 'fr',   -- sert au tri et à l'extraction des lieux
+    frequence_minutes INTEGER NOT NULL DEFAULT 60,  -- délai minimal entre deux interrogations
+    theme_impose      TEXT REFERENCES themes(code), -- NULL = thème décidé par les mots-clés
+    origine           TEXT NOT NULL DEFAULT 'config' CHECK (origine IN ('config', 'admin')),
+    dernier_succes    TEXT,                         -- dernière collecte réussie (fréquence)
     -- v6 : état de la source d'une collecte à l'autre
     etag           TEXT,                          -- en-tête ETag de la dernière réponse
     derniere_modif TEXT,                          -- en-tête Last-Modified de la dernière réponse
@@ -183,18 +224,25 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
             colonnes_sources = {r["name"] for r in cx.execute("PRAGMA table_info(sources)")}
             for nom, definition in (("etag", "TEXT"), ("derniere_modif", "TEXT"),      # v6
                                     ("echecs", "INTEGER NOT NULL DEFAULT 0"),
-                                    ("pause_jusqu_a", "TEXT")):
+                                    ("pause_jusqu_a", "TEXT"),
+                                    ("langue", "TEXT NOT NULL DEFAULT 'fr'"),          # v7
+                                    ("frequence_minutes", f"INTEGER NOT NULL DEFAULT {FREQUENCE_DEFAUT}"),
+                                    ("theme_impose", "TEXT REFERENCES themes(code)"),
+                                    ("origine", "TEXT NOT NULL DEFAULT 'config'"),
+                                    ("dernier_succes", "TEXT")):
                 if nom not in colonnes_sources:
                     cx.execute(f"ALTER TABLE sources ADD COLUMN {nom} {definition}")
+            for nom, definition in (("actif", "INTEGER NOT NULL DEFAULT 1"),           # v7
+                                    ("ordre", "INTEGER NOT NULL DEFAULT 0")):
+                if nom not in {r["name"] for r in cx.execute("PRAGMA table_info(themes)")}:
+                    cx.execute(f"ALTER TABLE themes ADD COLUMN {nom} {definition}")
             for instruction in _instructions(INDEX):   # après les ALTER : les index les utilisent
                 cx.execute(instruction)
             for instruction in _instructions(VUES):
                 cx.execute(instruction)
-            if not cx.execute("SELECT 1 FROM sources LIMIT 1").fetchone():   # migration vers v3
-                for s in SOURCES_INITIALES:
-                    _inserer_source(cx, s)
             cx.executemany("INSERT OR REPLACE INTO zones VALUES (?, ?)", ZONES.items())
-            cx.executemany("INSERT OR REPLACE INTO themes VALUES (?, ?)", THEMES.items())
+            appliquer_themes(cx)
+            appliquer_flux(cx)
             cx.execute(f"PRAGMA user_version = {VERSION_SCHEMA}")
         cx.commit()
     except Exception:
@@ -205,14 +253,88 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
 
 
 def a_jour(cx) -> bool:
-    """Vrai si le schéma est à la bonne version et les référentiels identiques au code."""
+    """Vrai si le schéma est à la bonne version et les référentiels identiques à la
+    configuration. Modifier config/themes.json suffit donc à déclencher une mise à jour
+    de la base à la prochaine ouverture : rien à lancer à la main."""
     if cx.execute("PRAGMA user_version").fetchone()[0] != VERSION_SCHEMA:
         return False
     try:
-        return (dict(cx.execute("SELECT code, nom FROM zones").fetchall()) == ZONES
-                and dict(cx.execute("SELECT code, nom FROM themes").fetchall()) == THEMES)
+        if dict(cx.execute("SELECT code, nom FROM zones").fetchall()) != ZONES:
+            return False
+        en_base = {r["code"]: (r["nom"], bool(r["actif"]), r["ordre"])
+                   for r in cx.execute("SELECT code, nom, actif, ordre FROM themes")}
+        attendu = {t["code"]: (t["nom"], t["actif"], t["ordre"]) for t in THEMES_DECLARES}
+        # un thème retiré de la configuration reste en base (ses articles aussi) : on ne
+        # compare donc que les thèmes déclarés
+        return all(en_base.get(code) == valeur for code, valeur in attendu.items())
     except sqlite3.OperationalError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Application de la configuration (config/themes.json et config/flux.json)
+# ---------------------------------------------------------------------------
+def appliquer_themes(cx) -> dict:
+    """Écrit les thèmes déclarés dans la base. Un thème retiré de la configuration est
+    désactivé, jamais supprimé : les articles déjà classés dedans resteraient orphelins."""
+    avant = {r["code"] for r in cx.execute("SELECT code FROM themes")}
+    for t in THEMES_DECLARES:
+        cx.execute("INSERT INTO themes (code, nom, actif, ordre) VALUES (?, ?, ?, ?) "
+                   "ON CONFLICT(code) DO UPDATE SET nom = excluded.nom, actif = excluded.actif, "
+                   "ordre = excluded.ordre",
+                   (t["code"], t["nom"], int(t["actif"]), t["ordre"]))
+    retires = avant - set(THEMES)
+    if retires:
+        cx.executemany("UPDATE themes SET actif = 0 WHERE code = ?", [(c,) for c in retires])
+    return {"declares": len(THEMES_DECLARES), "retires": sorted(retires)}
+
+
+def appliquer_flux(cx, chemin: Path = None) -> dict:
+    """Applique config/flux.json à la table sources.
+
+    Règle, à retenir : **le fichier décrit les flux, l'administration décide lesquels
+    tournent.** Les champs du catalogue (type, adresse, thème imposé, langue, fréquence,
+    paramètres, notes) sont repris du fichier à chaque fois ; « actif » n'est posé qu'à la
+    création, pour que désactiver une source depuis l'administration tienne.
+
+    Une source absente du fichier est désactivée, jamais supprimée : ses articles restent.
+    Les sources ajoutées depuis l'administration (origine = 'admin') ne sont pas touchées.
+    """
+    declares = {}
+    for f in lire_config(chemin or FLUX_JSON, "flux"):
+        s = valider_source({**f, "theme_impose": f.get("theme")})
+        if s["nom"] in declares:
+            raise ValueError(f"Le flux « {s['nom']} » est déclaré deux fois dans flux.json.")
+        s["fichier_test"] = f.get("fichier_test")
+        declares[s["nom"]] = s
+    maintenant = maintenant_utc().isoformat()
+    connues = {r["nom"]: r for r in cx.execute("SELECT * FROM sources")}
+    ajoutes, modifies, a_la_main = 0, 0, []
+    for nom, s in declares.items():
+        if nom not in connues:
+            _inserer_source(cx, {**s, "origine": "config"})
+            ajoutes += 1
+            continue
+        ancienne = connues[nom]
+        if ancienne["origine"] == "admin":
+            a_la_main.append(nom)   # reprise en main depuis l'administration : on n'écrase pas
+            continue
+        if ancienne["url"] != s["url"]:   # nouvelle adresse : les en-têtes mémorisés sont caducs
+            cx.execute("UPDATE sources SET etag = NULL, derniere_modif = NULL, echecs = 0, "
+                       "pause_jusqu_a = NULL WHERE id = ?", (ancienne["id"],))
+        cx.execute("""UPDATE sources SET type = ?, url = ?, parametres = ?, notes = ?,
+                      fichier_test = ?, langue = ?, frequence_minutes = ?, theme_impose = ?,
+                      origine = 'config', maj = ? WHERE id = ?""",
+                   (s["type"], s["url"], json.dumps(s["parametres"], ensure_ascii=False),
+                    s["notes"], s["fichier_test"], s["langue"], s["frequence_minutes"],
+                    s["theme_impose"], maintenant, ancienne["id"]))
+        modifies += 1
+    retires = [r["nom"] for r in connues.values()
+               if r["nom"] not in declares and r["origine"] == "config" and r["actif"]]
+    for nom in retires:
+        cx.execute("UPDATE sources SET actif = 0, maj = ? WHERE nom = ?", (maintenant, nom))
+    return {"ajoutes": ajoutes, "modifies": modifies, "desactives": retires,
+            "a_la_main": a_la_main}
 
 
 def _instructions(script: str):
@@ -374,18 +496,34 @@ def valider_source(d: dict) -> dict:
             raise ValueError(f"Thème par défaut inconnu : {theme}.")
         parametres = {"theme_defaut": theme}
     notes = (d.get("notes") or "").strip()[:1000] or None
+    langue = (d.get("langue") or "fr").strip().lower()
+    if langue not in LANGUES:
+        raise ValueError(f"Langue inconnue : {langue}. Langues gérées : {', '.join(LANGUES)}.")
+    brute = d.get("frequence_minutes")
+    try:   # 0 est une erreur de saisie, pas « valeur absente » : seul None prend le défaut
+        frequence = FREQUENCE_DEFAUT if brute is None else int(brute)
+    except (TypeError, ValueError):
+        raise ValueError("La fréquence doit être un nombre de minutes.") from None
+    if not 1 <= frequence <= 7 * 24 * 60:
+        raise ValueError("La fréquence doit être comprise entre 1 minute et 7 jours.")
+    impose = d.get("theme_impose") or None
+    if impose is not None and impose not in THEMES:
+        raise ValueError(f"Thème imposé inconnu : {impose}. Thèmes déclarés : {', '.join(THEMES)}.")
     return {"nom": nom, "type": type_, "url": url, "actif": bool(d.get("actif", True)),
-            "parametres": parametres, "notes": notes, "fichier_test": d.get("fichier_test")}
+            "parametres": parametres, "notes": notes, "fichier_test": d.get("fichier_test"),
+            "langue": langue, "frequence_minutes": frequence, "theme_impose": impose}
 
 
 def _inserer_source(cx, s: dict) -> int:
     maintenant = maintenant_utc().isoformat()
     cur = cx.execute(
-        """INSERT INTO sources (nom, type, url, actif, parametres, fichier_test, notes, ajout, maj)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO sources (nom, type, url, actif, parametres, fichier_test, notes,
+                                langue, frequence_minutes, theme_impose, origine, ajout, maj)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (s["nom"], s["type"], s.get("url"), int(bool(s.get("actif", True))),
          json.dumps(s.get("parametres") or {}, ensure_ascii=False), s.get("fichier_test"),
-         s.get("notes"), maintenant, maintenant))
+         s.get("notes"), s.get("langue", "fr"), s.get("frequence_minutes", FREQUENCE_DEFAUT),
+         s.get("theme_impose"), s.get("origine", "admin"), maintenant, maintenant))
     return cur.lastrowid
 
 
@@ -394,6 +532,17 @@ def _source(ligne) -> dict:
     d["actif"] = bool(d["actif"])
     d["parametres"] = json.loads(d["parametres"] or "{}")
     return d
+
+
+def source_a_rafraichir(s: dict, maintenant: datetime) -> bool:
+    """Faux si la source a déjà été interrogée avec succès il y a moins que sa fréquence.
+    Permet de lancer la collecte toutes les 10 minutes sans pour autant redemander un
+    quotidien toutes les 10 minutes."""
+    dernier = s.get("dernier_succes")
+    if not dernier:
+        return True
+    attendu = maintenant - timedelta(minutes=s.get("frequence_minutes") or FREQUENCE_DEFAUT)
+    return dernier <= attendu.isoformat()
 
 
 def lister_sources(cx, actives: bool = False) -> list:
@@ -433,8 +582,9 @@ def noter_etat_source(cx, source_id: int, ok: bool, maintenant: datetime,
         # un 304 ne renvoie pas d'en-tête : on garde ceux de la dernière réponse complète
         cx.execute("""UPDATE sources SET etag = COALESCE(?, etag),
                                          derniere_modif = COALESCE(?, derniere_modif),
-                                         echecs = 0, pause_jusqu_a = NULL WHERE id = ?""",
-                   (etag, derniere_modif, source_id))
+                                         echecs = 0, pause_jusqu_a = NULL, dernier_succes = ?
+                       WHERE id = ?""",
+                   (etag, derniere_modif, maintenant.isoformat(), source_id))
     else:
         ligne = cx.execute("SELECT echecs FROM sources WHERE id = ?", (source_id,)).fetchone()
         if ligne is None:
@@ -455,7 +605,8 @@ def source_en_pause(s: dict, maintenant: datetime) -> bool:
 def config_collecte(s: dict) -> dict:
     """Forme attendue par les connecteurs du collecteur (type, nom, url, fichier_test, paramètres)."""
     conf = {"type": s["type"], "nom": s["nom"], "url": s.get("url"), "fichier_test": s.get("fichier_test"),
-            "id": s.get("id"), "etag": s.get("etag"), "derniere_modif": s.get("derniere_modif")}
+            "id": s.get("id"), "etag": s.get("etag"), "derniere_modif": s.get("derniere_modif"),
+            "langue": s.get("langue", "fr"), "theme_impose": s.get("theme_impose")}
     p = s.get("parametres") or {}
     if s["type"] == "gdacs":
         conf["niveaux"] = ";".join(p.get("niveaux") or ["orange", "red"])
@@ -475,18 +626,30 @@ def ajouter_source(cx, d: dict) -> dict:
     return lire_source(cx, ident)
 
 
+# Champs décrits par config/flux.json. Les modifier depuis l'administration fait passer la
+# source « à la main » : le fichier cesse de s'appliquer à elle, et l'administration le dit.
+# « actif » n'en fait pas partie : activer ou couper une source reste le rôle normal de
+# l'administration, et le fichier ne le repose jamais après la création.
+CHAMPS_CATALOGUE = ("nom", "type", "url", "parametres", "notes", "langue",
+                    "frequence_minutes", "theme_impose")
+
+
 def modifier_source(cx, source_id: int, d: dict) -> dict:
     """Met à jour une source. Un changement de nom est reporté sur ses articles et son journal."""
     ancienne = lire_source(cx, source_id)
     if not ancienne:
         raise LookupError(f"Aucune source n° {source_id}.")
     s = valider_source({**ancienne, **d, "parametres": {**ancienne["parametres"], **(d.get("parametres") or {})}})
+    catalogue_touche = any(s[c] != ancienne.get(c) for c in CHAMPS_CATALOGUE)
+    origine = "admin" if catalogue_touche else ancienne.get("origine", "config")
     try:
         cx.execute(
-            """UPDATE sources SET nom = ?, type = ?, url = ?, actif = ?, parametres = ?, notes = ?, maj = ?
+            """UPDATE sources SET nom = ?, type = ?, url = ?, actif = ?, parametres = ?, notes = ?,
+                      langue = ?, frequence_minutes = ?, theme_impose = ?, origine = ?, maj = ?
                WHERE id = ?""",
             (s["nom"], s["type"], s["url"], int(s["actif"]), json.dumps(s["parametres"], ensure_ascii=False),
-             s["notes"], maintenant_utc().isoformat(), source_id))
+             s["notes"], s["langue"], s["frequence_minutes"], s["theme_impose"], origine,
+             maintenant_utc().isoformat(), source_id))
     except sqlite3.IntegrityError:
         cx.rollback()
         raise ValueError(f"Une source s'appelle déjà « {s['nom']} ».") from None

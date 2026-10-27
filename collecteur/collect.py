@@ -267,10 +267,11 @@ def charger(source: dict, hors_ligne: bool, url: str = None, donnees: dict = Non
     return http(url, donnees, entetes=entetes)
 
 
-def article(titre, lien, date, source, resume="", zone=None, theme=None, indice_theme=None):
+def article(titre, lien, date, source, resume="", zone=None, theme=None, indice_theme=None,
+            langue="fr"):
     return {"titre": nettoyer_html(titre), "lien": (lien or "").split("#")[0].strip(),
             "date": date, "source": source, "resume": nettoyer_html(resume),
-            "zone": zone, "theme": theme, "indice_theme": indice_theme}
+            "zone": zone, "theme": theme, "indice_theme": indice_theme, "langue": langue}
 
 
 # ======================================================================
@@ -358,11 +359,13 @@ def source_reliefweb(s, hors_ligne, pays_zone):
 # Programme principal
 # ======================================================================
 def referentiels() -> dict:
-    """Règles de tri et correspondances pays -> zone, chargées une fois par collecte."""
+    """Règles de tri et correspondances pays -> zone, chargées une fois par collecte.
+    Les mots-clés des thèmes viennent de config/themes.json ; ceux des zones de regles.json."""
     regles = json.loads(REGLES.read_text(encoding="utf-8"))
     pays = json.loads(PAYS.read_text(encoding="utf-8"))
     noms_fr = pays.pop("noms_fr", {})
-    return {"zones": compiler(regles["zones"]), "themes": compiler(regles["themes"]), "noms_fr": noms_fr,
+    return {"zones": compiler(regles["zones"]), "themes": compiler(base.REGLES_THEMES),
+            "noms_fr": noms_fr,
             "pays_zone": {iso: z for z, codes in pays.items() if not z.startswith("_") for iso in codes}}
 
 
@@ -386,22 +389,28 @@ def trier(a: dict, ref: dict) -> dict:
     return a
 
 
-def collecter_toutes(cx, collecte: int, ref: dict, hors_ligne: bool, parallele: int) -> list:
+def collecter_toutes(cx, collecte: int, ref: dict, hors_ligne: bool, parallele: int,
+                     forcer: bool = False) -> list:
     """Interroge toutes les sources actives en parallèle et renvoie leurs articles.
 
     Le réseau se fait dans un groupe de fils d'exécution ; les écritures en base restent
     dans le fil principal, au fur et à mesure que les résultats arrivent. Les sources sont
     parcourues dans l'ordre, donc le journal reste lisible malgré la concurrence.
 
-    Trois protections : une source en panne répétée est sautée (disjoncteur), un flux
-    inchangé répond 304 et n'est pas retéléchargé, et un seul téléchargement part à la fois
-    par domaine.
+    Quatre protections : une source déjà interrogée depuis moins que sa fréquence est laissée
+    tranquille, une source en panne répétée est sautée (disjoncteur), un flux inchangé répond
+    304 et n'est pas retéléchargé, et un seul téléchargement part à la fois par domaine.
+    `forcer` ignore la fréquence et le disjoncteur : c'est ce que fait le bouton « Lancer la
+    collecte » de l'administration, qui doit interroger tout de suite.
     """
-    sources, sautees = [], 0
+    sources, sautees, attendent = [], 0, 0
     for s in base.lister_sources(cx, actives=True):
         if hors_ligne and not s.get("fichier_test"):
             continue   # hors ligne : seules les sources qui ont une réponse enregistrée
-        if not hors_ligne and base.source_en_pause(s, MAINTENANT):
+        if not hors_ligne and not forcer and not base.source_a_rafraichir(s, MAINTENANT):
+            attendent += 1   # interrogée il y a moins que sa fréquence de rafraîchissement
+            continue
+        if not hors_ligne and not forcer and base.source_en_pause(s, MAINTENANT):
             base.noter_source(cx, collecte, s["nom"], False, 0,
                               f"source en pause jusqu'au {s['pause_jusqu_a'][:16].replace('T', ' ')} UTC "
                               f"après {s['echecs']} échecs")
@@ -425,6 +434,11 @@ def collecter_toutes(cx, collecte: int, ref: dict, hors_ligne: bool, parallele: 
     with ThreadPoolExecutor(max_workers=max(1, min(parallele, len(sources)))) as pool:
         for s, lot, entetes, erreur in pool.map(interroger, sources):
             if erreur is None:
+                if s.get("theme_impose"):        # flux thématique : le thème ne se devine pas
+                    for a in lot:
+                        a["theme"] = a["theme"] or s["theme_impose"]
+                for a in lot:
+                    a["langue"] = s.get("langue", "fr")
                 bruts += lot
                 base.noter_source(cx, collecte, s["nom"], True, len(lot))
                 base.noter_etat_source(cx, s.get("id"), True, MAINTENANT,
@@ -439,8 +453,9 @@ def collecter_toutes(cx, collecte: int, ref: dict, hors_ligne: bool, parallele: 
                 base.noter_source(cx, collecte, s["nom"], False, 0, str(erreur))
                 base.noter_etat_source(cx, s.get("id"), False, MAINTENANT)
                 print(f"[erreur] {s['nom']} : {erreur}")
-    if inchangees or sautees:
-        print(f"{inchangees} flux inchangés (304), {sautees} sources en pause (disjoncteur).")
+    if inchangees or sautees or attendent:
+        print(f"{inchangees} flux inchangés (304), {sautees} sources en pause (disjoncteur), "
+              f"{attendent} pas encore dues (fréquence de rafraîchissement).")
     return bruts
 
 
@@ -451,6 +466,9 @@ def main(argv=None):
     ap.add_argument("--base", default=str(base.BASE), help="base SQLite (défaut : donnees/map.sqlite)")
     ap.add_argument("--migrer", default=str(base.ANCIEN_JSON),
                     help="ancien data.json repris si la base est vide (migration)")
+    ap.add_argument("--forcer", action="store_true",
+                    help="interroge toutes les sources actives sans tenir compte de leur "
+                         "fréquence de rafraîchissement ni du disjoncteur")
     ap.add_argument("--parallele", type=int, default=PARALLELE, metavar="N",
                     help=f"sources interrogées en même temps (défaut : {PARALLELE}, "
                          "une seule à la fois par domaine)")
@@ -479,7 +497,8 @@ def main(argv=None):
             base.noter_source(cx, collecte, nom or Path(chemin).stem, True, len(lot))
             bruts += lot
     else:
-        bruts += collecter_toutes(cx, collecte, ref, args.hors_ligne, args.parallele)
+        bruts += collecter_toutes(cx, collecte, ref, args.hors_ligne, args.parallele,
+                                  args.forcer)
 
     # 3. Tri, puis 4. stockage dans la base
     compte = {"nouveau": 0, "maj": 0, "inchange": 0, "doublon": 0, "ancien": 0}

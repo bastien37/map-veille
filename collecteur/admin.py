@@ -3,6 +3,7 @@
 MAP – Outil d'administration de la base SQLite.
 
     uv run collecteur/admin.py stats                     # chiffres clés et dernières collectes
+    uv run collecteur/admin.py config                    # thèmes et sources issus de config/
     uv run collecteur/admin.py a-trier                   # articles que le tri n'a pas su classer
     uv run collecteur/admin.py classer 42 asi def        # classe l'article 42 à la main
     uv run collecteur/admin.py chercher "Taïwan"         # recherche dans les titres
@@ -61,6 +62,31 @@ def cmd_a_trier(cx, args):
     print("\nPour classer : uv run collecteur/admin.py classer <id> <zone> <thème>")
 
 
+def cmd_config(cx, args):
+    """Montre la configuration telle qu'elle vient d'être appliquée à la base.
+    base.ouvrir() a déjà relu config/themes.json et config/flux.json : si un fichier est
+    invalide, la commande s'arrête avant d'arriver ici, avec le message d'erreur."""
+    print(f"Thèmes déclarés dans {base.THEMES_JSON.relative_to(base.RACINE)} :")
+    print(f"  {'code':6}{'ordre':>6}  {'actif':7}{'mots-clés':>10}  nom")
+    for t in base.THEMES_DECLARES:
+        print(f"  {t['code']:6}{t['ordre']:>6}  {'oui' if t['actif'] else 'NON':7}"
+              f"{len(t['mots_cles']):>10}  {t['nom']}")
+    inactifs = [r["code"] for r in cx.execute("SELECT code FROM themes WHERE actif = 0")]
+    if inactifs:
+        print(f"  (thèmes désactivés encore présents en base : {', '.join(inactifs)})")
+
+    print(f"\nSources d'après {base.FLUX_JSON.relative_to(base.RACINE)} :")
+    print(f"  {'nom':34}{'type':11}{'lg':4}{'fréq':>6}  {'thème':7}{'origine':9}actif")
+    for s in base.lister_sources(cx):
+        print(f"  {s['nom'][:33]:34}{s['type']:11}{s['langue']:4}"
+              f"{s['frequence_minutes']:>5}m  {s['theme_impose'] or '—':7}"
+              f"{s['origine']:9}{'oui' if s['actif'] else 'non'}")
+    a_la_main = [s["nom"] for s in base.lister_sources(cx) if s["origine"] == "admin"]
+    if a_la_main:
+        print(f"\n  Reprises en main depuis l'administration (le fichier ne s'y applique plus) :"
+              f"\n    {', '.join(a_la_main)}")
+
+
 def cmd_chercher(cx, args):
     motif = f"%{base_norm(args.texte)}%"
     lignes = cx.execute("SELECT * FROM articles WHERE titre_norm LIKE ? ORDER BY date_pub DESC LIMIT ?",
@@ -89,6 +115,7 @@ def main(argv=None):
     ap.add_argument("--base", default=str(base.BASE))
     sous = ap.add_subparsers(dest="commande", required=True)
     sous.add_parser("stats", help="chiffres clés et dernières collectes")
+    sous.add_parser("config", help="thèmes et sources tels que la configuration les a posés")
     p = sous.add_parser("a-trier", help="articles non classés")
     p.add_argument("--limite", type=int, default=50)
     p = sous.add_parser("chercher", help="recherche dans les titres")
@@ -101,8 +128,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     cx = base.ouvrir(args.base)
-    {"stats": cmd_stats, "a-trier": cmd_a_trier, "chercher": cmd_chercher,
-     "classer": cmd_classer}[args.commande](cx, args)
+    {"stats": cmd_stats, "config": cmd_config, "a-trier": cmd_a_trier,
+     "chercher": cmd_chercher, "classer": cmd_classer}[args.commande](cx, args)
     cx.close()
 
 

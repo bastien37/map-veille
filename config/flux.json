@@ -1,0 +1,82 @@
+{
+  "_commentaire": "Sources de la veille. Ce fichier est le catalogue déclaré : à chaque collecte il est appliqué à la base (création des nouvelles sources, mise à jour de l'adresse, du thème imposé, de la langue et de la fréquence). L'interrupteur « actif » n'est posé qu'à la création : ensuite c'est l'administration qui décide quelles sources tournent. Une source retirée d'ici est désactivée, jamais supprimée : ses articles restent. Les sources ajoutées depuis l'administration ne sont pas touchées.\n  theme    : impose ce thème à tous les articles de la source (null = tri par mots-clés)\n  langue   : fr, en… sert à l'extraction des noms de lieux\n  frequence_minutes : délai minimal entre deux interrogations de cette source",
+  "flux": [
+    {
+      "nom": "Le Monde",
+      "type": "rss",
+      "url": "https://www.lemonde.fr/international/rss_full.xml",
+      "theme": null,
+      "langue": "fr",
+      "frequence_minutes": 60,
+      "actif": true
+    },
+    {
+      "nom": "France 24",
+      "type": "rss",
+      "url": "https://www.france24.com/fr/rss",
+      "theme": null,
+      "langue": "fr",
+      "frequence_minutes": 60,
+      "actif": true
+    },
+    {
+      "nom": "RFI",
+      "type": "rss",
+      "url": "https://www.rfi.fr/fr/rss",
+      "theme": null,
+      "langue": "fr",
+      "frequence_minutes": 60,
+      "actif": true
+    },
+    {
+      "nom": "franceinfo",
+      "type": "rss",
+      "url": "https://www.francetvinfo.fr/monde.rss",
+      "theme": null,
+      "langue": "fr",
+      "frequence_minutes": 60,
+      "actif": true
+    },
+    {
+      "nom": "Courrier international",
+      "type": "rss",
+      "url": "https://www.courrierinternational.com/feed/all/rss.xml",
+      "theme": null,
+      "langue": "fr",
+      "frequence_minutes": 60,
+      "actif": false
+    },
+    {
+      "nom": "GDACS (ONU / Commission européenne)",
+      "type": "gdacs",
+      "url": null,
+      "theme": "cli",
+      "langue": "fr",
+      "frequence_minutes": 60,
+      "actif": true,
+      "parametres": {
+        "niveaux": [
+          "orange",
+          "red"
+        ],
+        "jours": 7
+      },
+      "fichier_test": "tests/gdacs.json",
+      "notes": "Alertes de catastrophes naturelles. Citer « Global Disaster Alert and Coordination System, GDACS »."
+    },
+    {
+      "nom": "ReliefWeb (OCHA)",
+      "type": "reliefweb",
+      "url": null,
+      "theme": null,
+      "langue": "fr",
+      "frequence_minutes": 60,
+      "actif": false,
+      "parametres": {
+        "theme_defaut": "dip"
+      },
+      "fichier_test": "tests/reliefweb.json",
+      "notes": "Nécessite un appname approuvé par ReliefWeb, dans la variable d'environnement RELIEFWEB_APPNAME."
+    }
+  ]
+}

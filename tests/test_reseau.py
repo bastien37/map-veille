@@ -256,12 +256,12 @@ def test_flux_inchange_ne_perd_pas_les_articles(tmp_path, serveur):
                               "url": f"{serveur}/flux", "actif": True})
     cx.commit()
     cx.close()
-    collect.main(["--base", str(chemin), "--migrer", str(tmp_path / "rien.json")])
+    collect.main(["--base", str(chemin), "--migrer", str(tmp_path / "rien.json"), "--forcer"])
     cx = base.ouvrir(chemin)
     avant = cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
     assert avant == 1 and base.lire_source(cx, 1)["etag"] == ETAG
     cx.close()
-    collect.main(["--base", str(chemin), "--migrer", str(tmp_path / "rien.json")])
+    collect.main(["--base", str(chemin), "--migrer", str(tmp_path / "rien.json"), "--forcer"])
     cx = base.ouvrir(chemin)
     assert cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == avant
     dernier = cx.execute("SELECT message FROM collectes_sources ORDER BY collecte_id DESC "

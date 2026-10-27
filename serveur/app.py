@@ -109,12 +109,19 @@ def maintenant() -> datetime:
 def verifier(zone: Optional[str], theme: Optional[str]):
     if zone is not None and zone not in base.ZONES:
         raise HTTPException(422, f"Zone inconnue : {zone}. Codes valides : {', '.join(base.ZONES)}")
-    if theme is not None and theme not in base.THEMES:
-        raise HTTPException(422, f"Thème inconnu : {theme}. Codes valides : {', '.join(base.THEMES)}")
+    if theme is not None and theme not in base.THEMES_ACTIFS:
+        raise HTTPException(422, f"Thème inconnu ou désactivé : {theme}. "
+                                 f"Codes valides : {', '.join(base.THEMES_ACTIFS)}")
 
 
 def filtre_sql(zone, theme, jours):
-    """Clause WHERE commune : période (D05), zone et thème."""
+    """Clause WHERE commune : période (D05), zone et thème.
+
+    Le site ne montre que les thèmes actifs de config/themes.json. La liste est injectée
+    telle quelle (ce sont des codes validés à la lecture de la configuration, pas une saisie
+    d'utilisateur) : le planificateur garde ainsi son index, ce qu'une sous-requête
+    sur la table themes lui ferait perdre.
+    """
     depuis = (maintenant() - timedelta(days=jours)).isoformat()
     clauses, params = ["date_pub >= ?"], [depuis]
     if zone:
@@ -123,6 +130,8 @@ def filtre_sql(zone, theme, jours):
     if theme:
         clauses.append("theme = ?")
         params.append(theme)
+    else:
+        clauses.append("theme IN (%s)" % ", ".join("'%s'" % c for c in base.THEMES_ACTIFS))
     return " AND ".join(clauses), params
 
 
@@ -147,8 +156,10 @@ def referentiel(requete: Request, cx: sqlite3.Connection = Depends(connexion)):
                  for r in cx.execute("SELECT code, nom FROM zones")]
         ordre = list(base.ZONES)
         zones.sort(key=lambda z: ordre.index(z["code"]) if z["code"] in ordre else 99)
-        themes = [dict(r) for r in cx.execute("SELECT code, nom FROM themes")]
-        themes.sort(key=lambda t: list(base.THEMES).index(t["code"]) if t["code"] in base.THEMES else 99)
+        # seuls les thèmes actifs de config/themes.json sont proposés au visiteur ;
+        # les autres restent en base pour ne pas perdre les articles déjà classés
+        themes = [{"code": t["code"], "nom": t["nom"]}
+                  for t in base.THEMES_DECLARES if t["actif"]]
         corps, etag = serialiser({"zones": zones, "themes": themes,
                                   "duree_nouveau_heures": int(base.DUREE_NOUVEAU.total_seconds() // 3600)})
         _referentiel = (corps, gzip.compress(corps, 6), etag)
