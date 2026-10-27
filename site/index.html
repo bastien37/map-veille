@@ -4,7 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MAP – Carte de veille</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<!-- Polices chargées sans bloquer le rendu : media="print" puis bascule à onload. Les piles
+     de repli système (voir --display, --body, --mono) s'affichent en attendant. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"></noscript>
 <style>
 /* Layout : tableau de situation — carte des 6 zones à gauche, fil filtré à droite ; empilé sur téléphone */
 :root{
@@ -131,7 +137,7 @@ const zNom=c=>(ZONES.find(z=>z.code===c)||{nom:c}).nom, tNom=c=>(THEMES.find(t=>
 
 async function api(chemin, params={}){
   const q=new URLSearchParams(Object.entries(params).filter(([,v])=>v!=null&&v!==""));
-  const r=await fetch(`${API}/${chemin}${q.size?"?"+q:""}`,{cache:"no-store"});
+  const r=await fetch(`${API}/${chemin}${q.size?"?"+q:""}`);
   if(!r.ok){let m="HTTP "+r.status;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
   return r.json();
 }
@@ -174,6 +180,20 @@ function dessinerCarte(syn){
     g.setAttribute("aria-pressed",fZone===z.code);
     g.setAttribute("aria-label",`${z.nom} : ${n} information${n>1?"s":""}, dont ${nw} nouvelle${nw>1?"s":""}`);
     const T=z.tag; T.n.textContent=n; T.t.textContent=z.court||z.nom; T.nw.textContent=nw?`● ${nw}`:"";
+  });
+  placerEtiquettes();
+  svg.classList.toggle("hasSel",!!fZone);
+  document.querySelectorAll("#themes .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.t===fTheme));
+  document.querySelectorAll("#zonelist .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.z===fZone));
+  $("#maj").textContent=syn.mise_a_jour?fmtH(syn.mise_a_jour):"aucune collecte";
+  $("#srcs").textContent=syn.sources.join(", ")||"aucune";
+}
+
+// Largeur des étiquettes : dépend des polices, donc à recalculer quand elles arrivent.
+// Pur calcul de géométrie, aucune requête réseau.
+function placerEtiquettes(){
+  ZONES.forEach(z=>{
+    const T=z.tag; if(!T)return;
     let x=8; T.n.setAttribute("x",x); x+=T.n.getComputedTextLength()+6;
     T.t.setAttribute("x",x); const tl=T.t.getComputedTextLength(); if(tl)x+=tl+6;
     T.nw.setAttribute("x",x); const nl=T.nw.getComputedTextLength(); if(nl)x+=nl+6;
@@ -181,11 +201,6 @@ function dessinerCarte(syn){
     const [ex,ey]=z.etiquette||[0,0];
     T.g.setAttribute("transform",`translate(${ex-(x+2)/2},${ey})`);
   });
-  svg.classList.toggle("hasSel",!!fZone);
-  document.querySelectorAll("#themes .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.t===fTheme));
-  document.querySelectorAll("#zonelist .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.z===fZone));
-  $("#maj").textContent=syn.mise_a_jour?fmtH(syn.mise_a_jour):"aucune collecte";
-  $("#srcs").textContent=syn.sources.join(", ")||"aucune";
 }
 
 const ligne=i=>`<li>
@@ -234,7 +249,9 @@ async function actualiser(){
   $("#list").innerHTML='<li class="empty">Chargement des actualités…</li>';
   try{ construire(await api("referentiel")); }catch(e){ erreur(e); return; }
   await actualiser();
-  if(document.fonts)document.fonts.ready.then(actualiser);   // recalcule la largeur des étiquettes
+  // les polices changent la largeur du texte : on replace les étiquettes, sans
+  // redemander les données (ce rappel coûtait 2 appels API et 32 Kio par visite)
+  if(document.fonts)document.fonts.ready.then(placerEtiquettes);
 })();
 </script>
 </body>

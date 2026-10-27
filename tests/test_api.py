@@ -64,3 +64,52 @@ def test_front_sans_donnees(client):
     assert page.status_code == 200 and 'const API="api"' in page.text
     for interdit in ("MAP_DATA", "data.json", "Conflits et défense", "Europe"):
         assert interdit not in page.text
+
+
+# ---------- compression et cache HTTP ----------
+def test_reponses_compressees(client):
+    """Le référentiel pèse 87 Kio : il doit partir compressé."""
+    nu = client.get("/api/referentiel", headers={"Accept-Encoding": "identity"})
+    comprime = client.get("/api/referentiel", headers={"Accept-Encoding": "gzip"})
+    assert comprime.headers["content-encoding"] == "gzip"
+    assert int(comprime.headers["content-length"]) < len(nu.content) / 2
+    assert comprime.json() == nu.json()
+
+
+def test_petites_reponses_non_compressees(client):
+    """En dessous de 512 octets, compresser coûte plus que cela ne rapporte."""
+    r = client.get("/api/collectes", headers={"Accept-Encoding": "gzip"})
+    assert "content-encoding" not in r.headers
+
+
+@pytest.mark.parametrize("route, cache", [
+    ("/api/referentiel", "max-age=3600"),
+    ("/api/synthese", "max-age=60"),
+    ("/api/articles", "max-age=60"),
+])
+def test_entetes_de_cache(client, route, cache):
+    r = client.get(route)
+    assert cache in r.headers["cache-control"]
+    assert r.headers["etag"]
+
+
+@pytest.mark.parametrize("route", ["/api/referentiel", "/api/synthese", "/api/articles"])
+def test_304_si_le_navigateur_a_deja_la_version(client, route):
+    etag = client.get(route).headers["etag"]
+    rejoue = client.get(route, headers={"If-None-Match": etag})
+    assert rejoue.status_code == 304 and not rejoue.content
+    assert client.get(route, headers={"If-None-Match": '"autre"'}).status_code == 200
+
+
+def test_le_front_ne_demande_pas_deux_fois_les_donnees(client):
+    """Le rappel des polices recalculait la géométrie en redemandant tout à l'API."""
+    page = client.get("/").text
+    assert "document.fonts.ready.then(placerEtiquettes)" in page
+    assert "fonts.ready.then(actualiser)" not in page
+    assert 'cache:"no-store"' not in page
+
+
+def test_les_polices_ne_bloquent_pas_le_rendu(client):
+    page = client.get("/").text
+    assert 'media="print" onload="this.media=\'all\'"' in page
+    assert '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' in page
