@@ -124,6 +124,8 @@ footer{font-size:.78rem;color:var(--muted);max-width:75ch}
     <button class="chip" data-jours="1" aria-pressed="false">24 h</button>
     <button class="chip" data-jours="7" aria-pressed="false">7 jours</button>
     <button class="chip" data-jours="30" aria-pressed="true">30 jours</button>
+    <span class="lbl" id="lbl-langue">Langue</span>
+    <span id="langues"></span>
   </div>
 
   <div class="bar" id="themes"><span class="lbl">Thèmes</span></div>
@@ -160,8 +162,9 @@ const PAS=150;
 // la carte à points la remplace (voir bancs/DECISION-phase2.md, § 5)
 let THEMES=[], CARTE=null, fJours=30, limite=PAS, requete=0;
 let fThemes=[];            // thèmes cochés par le visiteur ; vide = tous
+let LANGUES=[], fLangue=null;   // langue choisie ; null = toutes
 let pageTheme=null;        // code du thème si on est sur /theme/<code>
-const CLE_THEMES="map.themes";
+const CLE_THEMES="map.themes", CLE_LANGUE="map.langue";
 let vue="points";          // points | zones | liste
 let carte=null;            // module site/carte.js, importé à la première vue « points »
 const $=s=>document.querySelector(s);
@@ -187,7 +190,7 @@ async function api(chemin, params={}){
 
 // ---------- construction depuis le référentiel ----------
 function construire(ref){
-  THEMES=ref.themes; CARTE=ref.carte;
+  THEMES=ref.themes; CARTE=ref.carte; LANGUES=ref.langues||[];
   THEMES.forEach(t=>{
     const b=document.createElement("button");
     b.className="chip"; b.textContent=t.nom; b.dataset.t=t.code;
@@ -199,6 +202,13 @@ function construire(ref){
     a.title=`Page dédiée au thème « ${t.nom} »`;
     a.onclick=e=>{e.preventDefault();ouvrirPageTheme(t.code)};
     $("#themes").appendChild(a);
+  });
+  const zl=$("#langues");
+  LANGUES.forEach(l=>{
+    const b=document.createElement("button");
+    b.className="chip"; b.textContent=l.nom; b.dataset.lg=l.code;
+    b.title=`N'afficher que les sources en ${l.nom.toLowerCase()}`;
+    zl.appendChild(b);
   });
   const reset=document.createElement("button");
   reset.className="reset"; reset.textContent="Tous les thèmes";
@@ -221,7 +231,7 @@ async function setVue(v){
       carte=await import(`${RACINE}carte.js`);
       await carte.creer($("#carte-points"), CARTE, {surSelection:ouvrirEvenement, racine:RACINE});
     }
-    carte.appliquerFiltres({themes:paramThemes(), jours:fJours});
+    carte.appliquerFiltres({themes:paramThemes(), jours:fJours, langue:fLangue});
     carte.invalider();     // le conteneur était caché : Leaflet doit remesurer
   }catch(e){
     $("#carte-etat").textContent="La carte n'a pas pu être chargée ; la liste reste disponible.";
@@ -265,6 +275,20 @@ function lirePageTheme(){
   return m ? m[1] : null;
 }
 
+// ---------- langue ----------
+// null = toutes. Un événement relayé en français et en anglais reste visible dans les deux.
+function setLangue(code){
+  fLangue=code;
+  ecrireMemoire(CLE_LANGUE, code);
+  marquerLangue();
+  if(carte)carte.appliquerFiltres({langue:code});
+  actualiser();
+}
+function marquerLangue(){
+  document.querySelectorAll("#langues .chip").forEach(b=>
+    b.setAttribute("aria-pressed", b.dataset.lg===fLangue));
+}
+
 function setJours(j){
   fJours=j;
   document.querySelectorAll("#vues .chip[data-jours]").forEach(b=>b.setAttribute("aria-pressed",+b.dataset.jours===j));
@@ -293,6 +317,7 @@ document.addEventListener("click",e=>{
   if(e.target.id==="fermer-panneau")fermerPanneau();
   if(e.target.dataset?.vue)setVue(e.target.dataset.vue);
   if(e.target.dataset?.jours)setJours(+e.target.dataset.jours);
+  if(e.target.dataset?.lg)setLangue(e.target.dataset.lg===fLangue?null:e.target.dataset.lg);
   if(e.target.classList?.contains("lien-evenement"))ouvrirEvenement(+e.target.dataset.evt);
 });
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#panneau").hidden)fermerPanneau()});
@@ -329,7 +354,8 @@ function dessinerFil(res){
 async function afficherPlus(){
   const b=$("#plus"); if(b){b.disabled=true;b.textContent="Chargement…"}
   try{
-    const res=await api("articles",{themes:paramThemes(),jours:fJours,limite:PAS,decalage:affiches});
+    const res=await api("articles",{themes:paramThemes(),langue:fLangue,jours:fJours,
+                                    limite:PAS,decalage:affiches});
     affiches+=res.articles.length;
     $(".more")?.remove();
     $("#list").insertAdjacentHTML("beforeend",res.articles.map(ligne).join("")+bouton());
@@ -345,8 +371,9 @@ async function actualiser(){
   const n=++requete;
   $("#list").setAttribute("aria-busy","true");
   try{
-    const [syn,res]=await Promise.all([api("synthese",{themes:paramThemes(),jours:fJours}),
-                                      api("articles",{themes:paramThemes(),jours:fJours,limite:PAS})]);
+    const [syn,res]=await Promise.all([
+      api("synthese",{themes:paramThemes(),langue:fLangue,jours:fJours}),
+      api("articles",{themes:paramThemes(),langue:fLangue,jours:fJours,limite:PAS})]);
     if(n!==requete)return;          // une requête plus récente a été lancée entre-temps
     dessinerEnTete(syn); dessinerFil(res);
   }catch(e){ if(n===requete)erreur(e) }
@@ -386,9 +413,12 @@ function replierSurInterrogation(){
   pageTheme = lirePageTheme();
   fThemes = lireMemoire(CLE_THEMES, []);
   fJours = lireMemoire("map.jours", 30);
+  fLangue = lireMemoire(CLE_LANGUE, null);
   try{ construire(await api("referentiel")); }catch(e){ erreur(e); return; }
   fThemes = fThemes.filter(c=>THEMES.some(t=>t.code===c));   // un thème peut avoir disparu
   marquerThemes();
+  if(!LANGUES.some(l=>l.code===fLangue))fLangue=null;   // langue retirée de la configuration
+  marquerLangue();
   document.querySelectorAll("#vues .chip[data-jours]").forEach(b=>b.setAttribute("aria-pressed",+b.dataset.jours===fJours));
   await actualiser();
   setVue("points");

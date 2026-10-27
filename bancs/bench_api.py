@@ -22,6 +22,9 @@ ROUTES = [
     ("articles (defaut 150)", "/api/articles?limite=150"),
     ("articles zone+theme", "/api/articles?zone=asi&theme=def&limite=150"),
     ("articles page 10", "/api/articles?limite=150&decalage=1500"),
+    ("articles langue=fr", "/api/articles?limite=150&langue=fr"),
+    ("evenements monde", "/api/evenements?limite=500"),
+    ("evenements langue=fr", "/api/evenements?limite=500&langue=fr"),
     ("collectes", "/api/collectes"),
     ("page / (HTML)", "/"),
 ]

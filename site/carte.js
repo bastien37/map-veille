@@ -120,7 +120,7 @@ export function invalider() {
   if (carte) carte.invalidateSize();
 }
 
-let filtres = { themes: null, jours: 30 };
+let filtres = { themes: null, jours: 30, langue: null };
 
 export function appliquerFiltres(nouveaux) {
   filtres = { ...filtres, ...nouveaux };
@@ -141,6 +141,7 @@ export async function rafraichir() {
   const params = new URLSearchParams({ bbox: bbox(), jours: filtres.jours,
                                        limite: config.points_max || 600 });
   if (filtres.themes) params.set("themes", filtres.themes);
+  if (filtres.langue) params.set("langue", filtres.langue);
   let d;
   try {
     const r = await fetch(`${RACINE}api/evenements?${params}`, { signal: requete.signal });

@@ -28,6 +28,7 @@ def gen(chemin: Path, n: int, jours: int = 30, graine: int = 42):
     maintenant = datetime(2026, 10, 27, 12, tzinfo=timezone.utc)
     zones, themes = list(base.ZONES), list(base.THEMES)
     sources = [f"Media {i}" for i in range(100)]
+    langues = ["fr"] * 7 + ["en"] * 3        # ~30 % de sources anglophones
     cid = base.debut_collecte(cx, maintenant, False)
     lignes = []
     for i in range(n):
@@ -37,12 +38,13 @@ def gen(chemin: Path, n: int, jours: int = 30, graine: int = 42):
         z = rnd.choice(zones) if rnd.random() > .05 else None
         t = rnd.choice(themes) if rnd.random() > .04 else None
         lignes.append((f"https://exemple.test/{i}", titre, normaliser(titre),
-                       rnd.choice(sources), d.isoformat(), z, t,
+                       rnd.choice(sources), d.isoformat(), z, t, rnd.choice(langues),
                        1 if rnd.random() < .02 else 0,
                        (maintenant - timedelta(seconds=rnd.randint(0, 5 * 86400))).isoformat(),
                        maintenant.isoformat(), cid))
     cx.executemany("""INSERT INTO articles (lien, titre, titre_norm, source, date_pub, zone, theme,
-                      masque, ajout, maj, collecte_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)""", lignes)
+                      langue, masque, ajout, maj, collecte_id)
+                      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", lignes)
     # Evenements : environ 3 articles par evenement, comme une collecte reelle (sur le banc
     # de flux, 3 920 articles donnent 1 300 evenements environ). Sans eux, le fil groupe
     # renverrait une liste vide et la mesure n'aurait aucun sens.
@@ -60,7 +62,9 @@ def gen(chemin: Path, n: int, jours: int = 30, graine: int = 42):
               0, maintenant.isoformat()) for i in range(1, n_evt + 1)])
         cx.execute("UPDATE articles SET evenement_id = 1 + (id % ?)", (n_evt,))
         cx.execute("UPDATE evenements SET nb_sources = "
-                   "(SELECT COUNT(*) FROM fil WHERE evenement_id = evenements.id)")
+                   "(SELECT COUNT(*) FROM fil WHERE evenement_id = evenements.id), "
+                   "langues = COALESCE((SELECT ',' || GROUP_CONCAT(DISTINCT langue) || ',' "
+                   "FROM fil WHERE evenement_id = evenements.id), '')")
     base.fin_collecte(cx, cid, maintenant, n, n, 0)
     cx.commit()
     cx.execute("ANALYZE")
