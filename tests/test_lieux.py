@@ -272,3 +272,37 @@ def test_coordonnees_enregistrees_en_base(tmp_path):
     r = cx.execute("SELECT lat, lon, lieu, lieu_origine FROM articles").fetchone()
     assert (r["lat"], r["lon"], r["lieu"], r["lieu_origine"]) == (35.68, 139.69, "Tokyo", "flux")
     cx.close()
+
+
+# ---------- la zone se déduit du lieu ----------
+@pytest.mark.parametrize("titre, zone", [
+    ("Inondations à Lagos : des milliers de déplacés", "afr"),
+    ("Saint-Pétersbourg : incendie dans un entrepôt", "rus"),
+    ("Cracovie accueille le sommet de l'OTAN", "eur"),
+    ("La Mecque se prépare au pèlerinage", "mena"),
+    ("Nouvelle-Orléans : alerte cyclonique", "ame"),
+])
+def test_la_zone_se_deduit_du_lieu_trouve(gaz, titre, zone):
+    """Le gazetteer connaît plus de lieux que les mots-clés de zone : la zone se déduit du
+    pays du lieu, sinon l'article serait placé sur la carte mais pas diffusé (D04)."""
+    ref = collect.referentiels()
+    a = collect.article(titre, "https://x.test/1", None, "src")
+    collect.trier(a, ref)
+    assert a["zone"] is None, "ce cas n'est intéressant que si les mots-clés échouent"
+    collect.situer(a, gaz, ref=ref)
+    assert a["lat"] is not None and a["zone"] == zone
+
+
+def test_les_mots_cles_restent_prioritaires_sur_la_deduction(gaz):
+    ref = collect.referentiels()
+    a = collect.article("Ukraine : frappes sur Kharkiv", "https://x.test/1", None, "src")
+    collect.trier(a, ref)
+    zone_mots_cles = a["zone"]
+    collect.situer(a, gaz, ref=ref)
+    assert a["zone"] == zone_mots_cles == "rus"
+
+
+def test_sans_referentiel_aucune_deduction(gaz):
+    a = collect.article("Inondations à Lagos", "https://x.test/1", None, "src")
+    collect.situer(a, gaz)
+    assert a["lat"] is not None and a["zone"] is None
