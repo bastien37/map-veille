@@ -17,6 +17,7 @@ politique réseau bloque les hôtes externes.
 | `gen_base.py` | Génère des bases SQLite réalistes de 5 000, 50 000 et 200 000 articles |
 | `bench_api.py` | Latences p50/p95/p99 et taille des réponses de chaque route, aux trois volumes |
 | `bench_sql.py` | Plans d'exécution SQLite, effet mesuré d'un index composite, taux de compression |
+| `bench_bbox.py` | Requêtes par bbox de la future carte à points : sans index spatial, avec B-tree, avec R*Tree |
 | `bench_front.mjs` | Chargement de la page : requêtes, octets, premier affichage (Playwright) |
 | `proto_tri.py` | Prototype du tri en un seul balayage + **vérification d'équivalence stricte** avec `collect.classer` |
 | `proto_py.py` | Prototype Python optimisé (téléchargement concurrent + tri rapide) |
@@ -38,6 +39,7 @@ uv run bancs/profil_cpu.py 8910                              # découpe + profil
 uv run bancs/gen_base.py
 uv run bancs/bench_api.py
 uv run bancs/bench_sql.py
+uv run bancs/bench_bbox.py                                   # stockage de la carte à points
 
 # 4. front (serveur lancé sur 8940 avec MAP_BASE=bancs/api_50k.sqlite)
 node bancs/bench_front.mjs http://127.0.0.1:8940/ 0
@@ -49,3 +51,5 @@ cd bancs/go && go run . 8910 32           # Go
 ```
 
 Les bases produites (`bancs/*.sqlite`) sont ignorées par git.
+
+Résultats : `RAPPORT-phase1.md` (audit) et `DECISION-phase2.md` (langage et stockage).
