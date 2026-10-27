@@ -25,11 +25,43 @@ def ecrire(chemin: Path, cle: str, contenu) -> Path:
 # ---------- les fichiers livrés ----------
 def test_les_fichiers_livres_sont_valides():
     themes = base.charger_themes()
-    assert [t["code"] for t in themes] == ["def", "dip", "eco", "tec", "cli"]
-    assert all(t["mots_cles"] for t in themes)
+    codes = [t["code"] for t in themes]
+    assert len(codes) == len(set(codes)) >= 5
+    assert codes == [t["code"] for t in sorted(themes, key=lambda x: (x["ordre"], x["code"]))]
+    assert all(t["mots_cles"] and t["nom"] for t in themes)
     flux = base.lire_config(base.FLUX_JSON, "flux")
     assert {f["nom"] for f in flux} >= {"Le Monde", "France 24", "RFI", "franceinfo"}
     assert all(f.get("langue") in base.LANGUES for f in flux)
+    assert all(f.get("theme") in (None, *base.THEMES) for f in flux)
+
+
+def test_le_theme_geopolitique_et_ses_flux_sont_livres():
+    """Thème demandé pour la veille stratégique, avec ses sources de think tanks."""
+    assert "geo" in base.THEMES
+    flux = base.lire_config(base.FLUX_JSON, "flux")
+    geo = [f for f in flux if f.get("theme") == "geo"]
+    assert {f["nom"] for f in geo} >= {"IFRI", "IRSEM", "Le Grand Continent",
+                                       "Revue Défense Nationale", "The National Interest"}
+    # ces sources publient quelques fois par semaine : les interroger toutes les heures
+    # n'aurait aucun sens
+    assert all(f["frequence_minutes"] >= 180 for f in geo)
+    assert {f["langue"] for f in geo} == {"fr", "en"}
+    # chaque adresse non testée doit le dire : personne ne doit croire qu'elles sont sûres
+    assert all("VÉRIFIÉE" in f.get("notes", "") or "confirmer" in f.get("notes", "")
+               for f in geo)
+
+
+def test_les_mots_cles_geo_ne_devorent_pas_les_autres_themes():
+    """« geo » marque le registre d'analyse, pas les faits : un missile reste « def »."""
+    tables = collect.referentiels()["themes"]
+    assert collect.classer("Ukraine : frappes de missiles sur Kharkiv", "", tables) == "def"
+    assert collect.classer("Le président reçoit l'ambassadeur de Chine", "", tables) == "dip"
+    assert collect.classer("Séisme au Japon, alerte au tsunami", "", tables) == "cli"
+    for titre in ("La rivalité systémique entre Washington et Pékin",
+                  "Vers un ordre international multipolaire ?",
+                  "Great power competition in the Indo-Pacific",
+                  "Autonomie stratégique européenne : où en est-on ?"):
+        assert collect.classer(titre, "", tables) == "geo", titre
 
 
 def test_les_themes_ne_sont_plus_codes_en_dur():

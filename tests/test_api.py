@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE / "collecteur"))
 sys.path.insert(0, str(RACINE))
+import base  # noqa: E402
 import collect  # noqa: E402
 from serveur import app as serveur  # noqa: E402
 
@@ -26,7 +27,10 @@ def test_referentiel(client):
     # la zone reste un attribut de classement, mais n'a plus de tracé : le SVG des six
     # zones a été remplacé par la carte à points (87,6 Kio de moins à chaque visite)
     assert all(set(z) == {"code", "nom"} for z in r["zones"])
-    assert [t["code"] for t in r["themes"]] == ["def", "dip", "eco", "tec", "cli"]
+    # pas de liste figée : l'API doit servir exactement les thèmes actifs de la
+    # configuration, dans leur ordre. Ajouter un thème ne doit pas casser ce test.
+    attendus = [t["code"] for t in base.THEMES_DECLARES if t["actif"]]
+    assert [t["code"] for t in r["themes"]] == attendus
 
 
 def test_synthese(client):

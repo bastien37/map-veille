@@ -34,9 +34,12 @@ def client(chemin, monkeypatch):
 def test_sources_initiales(chemin):
     cx = base.ouvrir(chemin)
     sources = base.lister_sources(cx)
-    assert len(sources) == 7
-    assert {s["nom"] for s in base.lister_sources(cx, actives=True)} == \
-        {"Le Monde", "France 24", "RFI", "franceinfo", "GDACS (ONU / Commission européenne)"}
+    assert len(sources) == len(base.lire_config(base.FLUX_JSON, "flux"))
+    actives = {s["nom"] for s in base.lister_sources(cx, actives=True)}
+    declarees_actives = {f["nom"] for f in base.lire_config(base.FLUX_JSON, "flux")
+                         if f.get("actif", True)}
+    assert actives == declarees_actives
+    assert {"Le Monde", "France 24", "RFI", "franceinfo"} <= actives
     gdacs = next(s for s in sources if s["type"] == "gdacs")
     assert gdacs["parametres"] == {"niveaux": ["orange", "red"], "jours": 7}
     assert base.config_collecte(gdacs)["niveaux"] == "orange;red"
@@ -50,7 +53,7 @@ def test_migration_v2_vers_v3_ajoute_les_sources(chemin):
     cx.commit()
     cx.close()
     cx = base.ouvrir(chemin)
-    assert len(base.lister_sources(cx)) == 7 and base.a_jour(cx)
+    assert len(base.lister_sources(cx)) == len(base.lire_config(base.FLUX_JSON, "flux")) and base.a_jour(cx)
 
 
 @pytest.mark.parametrize("saisie, message", [
@@ -90,7 +93,8 @@ def test_collecte_ignore_les_sources_desactivees(chemin):
 def test_admin_liste_les_sources_avec_leur_etat(client, chemin):
     collect.main(["--base", str(chemin), "--hors-ligne"])
     d = client.get("/api/admin/sources", auth=AUTH).json()
-    assert len(d["sources"]) == 7 and "rss" in d["types"]
+    assert len(d["sources"]) == len(base.lire_config(base.FLUX_JSON, "flux"))
+    assert "rss" in d["types"]
     gdacs = next(s for s in d["sources"] if s["type"] == "gdacs")
     assert gdacs["articles"] == 3 and "fichier_test" not in gdacs
     assert client.get("/api/admin/sources").status_code == 401
@@ -108,7 +112,8 @@ def test_admin_ajouter_modifier_supprimer(client):
     assert client.patch(f"/api/admin/sources/{ident}", json={"url": "pas-une-url"}, auth=AUTH).status_code == 422
     assert client.delete(f"/api/admin/sources/{ident}", auth=AUTH).status_code == 204
     assert client.delete(f"/api/admin/sources/{ident}", auth=AUTH).status_code == 404
-    assert len(client.get("/api/admin/sources", auth=AUTH).json()["sources"]) == 7
+    declares = len(base.lire_config(base.FLUX_JSON, "flux"))
+    assert len(client.get("/api/admin/sources", auth=AUTH).json()["sources"]) == declares
 
 
 def test_admin_tester_une_source_sans_enregistrer(client, monkeypatch, chemin):
@@ -119,7 +124,7 @@ def test_admin_tester_une_source_sans_enregistrer(client, monkeypatch, chemin):
     assert {"zone": "rus", "theme": "def"}.items() <= r["apercu"][0].items()
     cx = base.ouvrir(chemin)
     assert cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 0          # rien d'écrit
-    assert len(base.lister_sources(cx)) == 7
+    assert len(base.lister_sources(cx)) == len(base.lire_config(base.FLUX_JSON, "flux"))
 
 
 def test_admin_tester_une_source_en_panne(client, monkeypatch):

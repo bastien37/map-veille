@@ -1,5 +1,5 @@
 {
-  "_commentaire": "Sources de la veille. Ce fichier est le catalogue déclaré : à chaque collecte il est appliqué à la base (création des nouvelles sources, mise à jour de l'adresse, du thème imposé, de la langue et de la fréquence). L'interrupteur « actif » n'est posé qu'à la création : ensuite c'est l'administration qui décide quelles sources tournent. Une source retirée d'ici est désactivée, jamais supprimée : ses articles restent. Les sources ajoutées depuis l'administration ne sont pas touchées.\n  theme    : impose ce thème à tous les articles de la source (null = tri par mots-clés)\n  langue   : fr, en… sert à l'extraction des noms de lieux\n  frequence_minutes : délai minimal entre deux interrogations de cette source",
+  "_commentaire": "Sources de la veille. Ce fichier est le catalogue déclaré : à chaque collecte il est appliqué à la base (création des nouvelles sources, mise à jour de l'adresse, du thème imposé, de la langue et de la fréquence). L'interrupteur « actif » n'est posé qu'à la création : ensuite c'est l'administration qui décide quelles sources tournent. Une source retirée d'ici est désactivée, jamais supprimée : ses articles restent. Les sources ajoutées depuis l'administration ne sont pas touchées.\n  theme    : impose ce thème à tous les articles de la source (null = tri par mots-clés)\n  langue   : fr, en… sert à l'extraction des noms de lieux\n  frequence_minutes : délai minimal entre deux interrogations de cette source\n\nATTENTION : les adresses des flux de think tanks ajoutées pour le thème « geo » n'ont pas pu être testées (réseau sortant bloqué là où elles ont été écrites). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte, puis corriger ou désactiver ce qui ne répond pas. Une source qui échoue plusieurs fois est de toute façon mise de côté par le disjoncteur : elle ne ralentit pas les autres.",
   "flux": [
     {
       "nom": "Le Monde",
@@ -77,6 +77,166 @@
       },
       "fichier_test": "tests/reliefweb.json",
       "notes": "Nécessite un appname approuvé par ReliefWeb, dans la variable d'environnement RELIEFWEB_APPNAME."
+    },
+    {
+      "nom": "IFRI",
+      "type": "rss",
+      "url": "https://www.ifri.org/fr/rss.xml",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Institut français des relations internationales. Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+    },
+    {
+      "nom": "IRSEM",
+      "type": "rss",
+      "url": "https://www.irsem.fr/rss.xml",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Institut de recherche stratégique de l'École militaire. Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+    },
+    {
+      "nom": "Le Grand Continent",
+      "type": "rss",
+      "url": "https://legrandcontinent.eu/fr/feed/",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+    },
+    {
+      "nom": "Revue Défense Nationale",
+      "type": "rss",
+      "url": "https://www.defnat.com/rss.php",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "RDN. Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+    },
+    {
+      "nom": "The National Interest",
+      "type": "rss",
+      "url": "https://nationalinterest.org/rss.xml",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+    },
+    {
+      "nom": "Le Rubicon",
+      "type": "rss",
+      "url": "https://lerubicon.org/feed/",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+    },
+    {
+      "nom": "Revue Conflits",
+      "type": "rss",
+      "url": "https://www.revueconflits.com/feed/",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+    },
+    {
+      "nom": "Diploweb",
+      "type": "rss",
+      "url": "https://www.diploweb.com/spip.php?page=backend",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Site SPIP : page=backend est l'adresse habituelle du flux. Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+    },
+    {
+      "nom": "Institut Montaigne",
+      "type": "rss",
+      "url": "https://www.institutmontaigne.org/rss.xml",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+    },
+    {
+      "nom": "Fondation Robert Schuman",
+      "type": "rss",
+      "url": "https://www.robert-schuman.eu/rss.php",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+    },
+    {
+      "nom": "Areion24.news",
+      "type": "rss",
+      "url": "https://www.areion24.news/feed/",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+    },
+    {
+      "nom": "War on the Rocks",
+      "type": "rss",
+      "url": "https://warontherocks.com/feed/",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+    },
+    {
+      "nom": "ECFR",
+      "type": "rss",
+      "url": "https://ecfr.eu/feed/",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "European Council on Foreign Relations. Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+    },
+    {
+      "nom": "Carnegie Endowment",
+      "type": "rss",
+      "url": "https://carnegieendowment.org/rss/pubs",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+    },
+    {
+      "nom": "Atlantic Council",
+      "type": "rss",
+      "url": "https://www.atlanticcouncil.org/feed/",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+    },
+    {
+      "nom": "Lowy Institute – The Interpreter",
+      "type": "rss",
+      "url": "https://www.lowyinstitute.org/the-interpreter/rss.xml",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
     }
   ]
 }
