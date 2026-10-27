@@ -19,6 +19,7 @@ BASE = RACINE / "donnees" / "map.sqlite"
 ANCIEN_JSON = RACINE / "site" / "data.json"   # ancien format, lu une seule fois pour la migration
 CONFIG = RACINE / "config"
 THEMES_JSON = CONFIG / "themes.json"
+GEOCODAGE_JSON = CONFIG / "geocodage.json"
 FLUX_JSON = CONFIG / "flux.json"
 DUREE_FIL = timedelta(days=30)   # D05 : durée de conservation ; au-delà, l'article est supprimé à la collecte
 DUREE_NOUVEAU = timedelta(hours=48)   # F06 : repère « Nouveau »
@@ -83,9 +84,10 @@ THEMES = {t["code"]: t["nom"] for t in THEMES_DECLARES}
 THEMES_ACTIFS = [t["code"] for t in THEMES_DECLARES if t["actif"]]
 REGLES_THEMES = {t["code"]: t["mots_cles"] for t in THEMES_DECLARES}
 
-VERSION_SCHEMA = 7   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+VERSION_SCHEMA = 8   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
                     # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs,
-                    # pause_jusqu_a ; v7 : themes.actif/ordre, sources.langue/frequence/theme/origine
+                    # pause_jusqu_a ; v7 : themes.actif/ordre, sources.langue/frequence/theme/
+                    # origine ; v8 : articles.lat/lon/lieu, table lieux_geocodes
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -136,7 +138,26 @@ CREATE TABLE IF NOT EXISTS articles (
     masque      INTEGER NOT NULL DEFAULT 0 CHECK (masque IN (0, 1)),  -- retiré du site par un administrateur
     ajout       TEXT NOT NULL,                  -- première collecte (repère « Nouveau »)
     maj         TEXT NOT NULL,                  -- dernière modification
-    collecte_id INTEGER REFERENCES collectes(id)
+    collecte_id INTEGER REFERENCES collectes(id),
+    -- v8 : position sur la carte. NULL = article non localisé : il reste dans la liste,
+    -- mais n'apparaît pas sur la carte. Mieux vaut pas de point qu'un point faux.
+    lat           REAL,
+    lon           REAL,
+    lieu          TEXT,                         -- nom du lieu retenu, affiché au survol
+    lieu_origine  TEXT                          -- flux | gazetteer | nominatim | photon
+);
+-- v8 : cache de géocodage. Les conditions d'usage de Nominatim l'imposent, et de toute
+-- façon un lieu ne doit jamais être demandé deux fois. Les échecs sont mémorisés aussi,
+-- sans quoi les mêmes introuvables repartiraient à chaque collecte.
+CREATE TABLE IF NOT EXISTS lieux_geocodes (
+    cle          TEXT PRIMARY KEY,   -- nom normalisé (minuscules, sans accents)
+    nom          TEXT NOT NULL,      -- nom renvoyé par le service
+    lat          REAL,               -- NULL = cherché et introuvable
+    lon          REAL,
+    origine      TEXT NOT NULL,
+    ajout        TEXT NOT NULL,
+    maj          TEXT NOT NULL,
+    utilisations INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sources (
     id           INTEGER PRIMARY KEY,
@@ -175,6 +196,10 @@ CREATE INDEX IF NOT EXISTS idx_articles_titre ON articles(titre_norm);
 -- le comptage filtré retombe de 2,9 à 8,5 ms.
 CREATE INDEX IF NOT EXISTS idx_articles_zone   ON articles(zone, masque, date_pub, theme, ajout);
 CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source, masque, date_pub, zone, theme);
+-- v8 : requêtes de la carte (points d'une fenêtre géographique sur une période). Mesuré
+-- sur 200 000 articles : un index spatial dédié n'apporte rien à ce volume et dégrade même
+-- la vue mondiale (bancs/bench_bbox.py) ; celui-ci suffit.
+CREATE INDEX IF NOT EXISTS idx_articles_carte ON articles(masque, date_pub, lat, lon, theme);
 """
 
 VUES = """
@@ -232,6 +257,10 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
                                     ("dernier_succes", "TEXT")):
                 if nom not in colonnes_sources:
                     cx.execute(f"ALTER TABLE sources ADD COLUMN {nom} {definition}")
+            for nom, definition in (("lat", "REAL"), ("lon", "REAL"),                  # v8
+                                    ("lieu", "TEXT"), ("lieu_origine", "TEXT")):
+                if nom not in colonnes:
+                    cx.execute(f"ALTER TABLE articles ADD COLUMN {nom} {definition}")
             for nom, definition in (("actif", "INTEGER NOT NULL DEFAULT 1"),           # v7
                                     ("ordre", "INTEGER NOT NULL DEFAULT 0")):
                 if nom not in {r["name"] for r in cx.execute("PRAGMA table_info(themes)")}:
@@ -407,10 +436,11 @@ def enregistrer(cx, a: dict, titre_norm: str, maintenant: datetime, collecte_id:
 
     cx.execute(
         """INSERT INTO articles (lien, titre, titre_norm, source, date_pub, zone, theme,
-                                 ajout, maj, collecte_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                 ajout, maj, collecte_id, lat, lon, lieu, lieu_origine)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (a["lien"], a["titre"], titre_norm, a["source"], (a["date"] or maintenant).isoformat(),
-         a["zone"], a["theme"], maintenant.isoformat(), maintenant.isoformat(), collecte_id))
+         a["zone"], a["theme"], maintenant.isoformat(), maintenant.isoformat(), collecte_id,
+         a.get("lat"), a.get("lon"), a.get("lieu"), a.get("lieu_origine")))
     return "nouveau"
 
 

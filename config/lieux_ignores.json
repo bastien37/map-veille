@@ -1,0 +1,12 @@
+{
+  "_commentaire": "Noms de lieux que l'extraction ne doit PAS reconnaître, parce qu'ils sont aussi des mots courants en français ou en anglais. Ce sont de vraies villes, mais les reconnaître placerait des articles n'importe où : « la marche du gouvernement » n'est pas une dépêche sur Marche (Italie). Retirer une entrée d'ici la réactive ; en ajouter une la désactive. Comparaison faite sans accents ni majuscules.",
+  "ignores": [
+    "Canton", "Nice", "Tours", "Union", "Gare", "Marche", "Split", "Bar", "Mobile",
+    "Reading", "Bath", "Derby", "Worms", "Essen", "Male", "Both", "Same", "Why",
+    "Most", "Nice", "Sale", "Best", "Hope", "Mission", "Industry", "Progress",
+    "Liberty", "Independence", "Republic", "Federal", "National", "Central",
+    "Orange", "Olive", "Pointe Noire", "Blanc", "Pilier", "Avon", "Severn",
+    "Niger", "Jordan", "Chad", "Mali", "Guinea", "Georgia", "Nord", "Sud", "Est",
+    "Ouest", "Centre", "Ville", "Port", "Pont", "Mont", "Val", "Bourg", "Champ"
+  ]
+}

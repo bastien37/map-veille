@@ -45,7 +45,8 @@ from pathlib import Path
 
 import feedparser
 
-import base   # stockage SQLite (collecteur/base.py)
+import base    # stockage SQLite (collecteur/base.py)
+import lieux   # extraction des lieux et géocodage (collecteur/lieux.py)
 
 RACINE = Path(__file__).resolve().parent.parent
 REGLES = RACINE / "collecteur" / "regles.json"
@@ -268,10 +269,11 @@ def charger(source: dict, hors_ligne: bool, url: str = None, donnees: dict = Non
 
 
 def article(titre, lien, date, source, resume="", zone=None, theme=None, indice_theme=None,
-            langue="fr"):
+            langue="fr", lat=None, lon=None, lieu=None):
     return {"titre": nettoyer_html(titre), "lien": (lien or "").split("#")[0].strip(),
             "date": date, "source": source, "resume": nettoyer_html(resume),
-            "zone": zone, "theme": theme, "indice_theme": indice_theme, "langue": langue}
+            "zone": zone, "theme": theme, "indice_theme": indice_theme, "langue": langue,
+            "lat": lat, "lon": lon, "lieu": lieu, "lieu_origine": None}
 
 
 # ======================================================================
@@ -285,9 +287,14 @@ def lire_rss(contenu: bytes, nom: str):
     sortie = []
     for e in flux.entries:
         cats = " ".join(t.get("term") or "" for t in e.get("tags", []))
+        # georss:point, geo:lat/geo:long, georss:where : quand le média donne la position,
+        # elle vaut mieux que tout ce qu'on pourrait deviner du titre
+        coord = lieux.coordonnees_du_flux(e)
         sortie.append(article(e.get("title", ""), e.get("link", ""),
                               lire_date(e.get("published") or e.get("updated")), nom,
-                              (e.get("summary") or "") + " " + cats))
+                              (e.get("summary") or "") + " " + cats,
+                              lat=coord[0] if coord else None,
+                              lon=coord[1] if coord else None))
     return sortie
 
 
@@ -324,8 +331,12 @@ def source_gdacs(s, hors_ligne, pays_zone, noms_fr):
         sev = (p.get("severitydata") or {}).get("severitytext")
         lien = (p.get("url") or {}).get("report") or \
             f"https://www.gdacs.org/report.aspx?eventtype={typ}&eventid={p.get('eventid')}"
+        geo = (f.get("geometry") or {}).get("coordinates") or []
+        coord = lieux.valider_coordonnees(geo[1], geo[0]) if len(geo) == 2 else None
         sortie.append(article(titre, lien, lire_date(p.get("fromdate")), s["nom"], sev or "",
-                              zone=zone, theme="cli"))
+                              zone=zone, theme="cli", lieu=pays or None,
+                              lat=coord[0] if coord else None,
+                              lon=coord[1] if coord else None))
     return sortie
 
 
@@ -350,6 +361,7 @@ def source_reliefweb(s, hors_ligne, pays_zone):
                               lire_date((f.get("date") or {}).get("created")),
                               f"ReliefWeb{' – ' + org if org else ''}",
                               zone=pays_zone.get(iso),
+                              lieu=(f.get("primary_country") or {}).get("name"),
                               # thème : par mots-clés ; sinon catastrophe -> cli, sinon theme_defaut
                               indice_theme="cli" if catastrophe else s.get("theme_defaut", "dip")))
     return sortie
@@ -386,6 +398,45 @@ def trier(a: dict, ref: dict) -> dict:
     """Étape 3 : zone et thème (ceux fournis par l'API d'abord, puis les mots-clés)."""
     a["zone"] = a["zone"] or classer(a["titre"], a["resume"], ref["zones"])
     a["theme"] = a["theme"] or classer(a["titre"], a["resume"], ref["themes"]) or a["indice_theme"]
+    return a
+
+
+def situer(a: dict, gaz: dict, cx=None, geocodeur=None) -> dict:
+    """Étape 3 bis : où placer l'article sur la carte. Trois chances, dans cet ordre.
+
+    1. Les coordonnées données par le flux (georss, geo:lat/long) ou par l'API de la source.
+    2. Le nom de lieu que la source fournit explicitement — le pays d'une alerte GDACS, par
+       exemple : cherché d'abord dans le gazetteer local, et seulement s'il y est inconnu,
+       auprès du service de géocodage, avec cache. C'est le seul cas où l'on sort : un nom
+       qu'une source nous a donné comme étant un lieu, pas un mot deviné dans une phrase.
+    3. Un nom de lieu reconnu dans le titre ou le résumé (gazetteer local uniquement).
+
+    Un article qu'on ne sait pas placer garde lat et lon à NULL : il reste dans la liste
+    mais n'apparaît pas sur la carte. Mieux vaut pas de point qu'un point faux.
+    """
+    if a.get("lat") is not None and a.get("lon") is not None:
+        a["lieu_origine"] = a.get("lieu_origine") or "flux"
+        return a
+
+    annonce = (a.get("lieu") or "").strip()
+    if annonce:
+        connus = gaz["index"].get(lieux.normaliser(annonce))
+        if connus:
+            lieu = connus[0]
+            a["lat"], a["lon"] = lieu["y"], lieu["x"]
+            a["lieu"], a["lieu_origine"] = lieu["n"], "gazetteer"
+            return a
+        if cx is not None and geocodeur is not None:
+            trouve = lieux.geocoder_avec_cache(cx, annonce, geocodeur, MAINTENANT)
+            if trouve:
+                a["lat"], a["lon"] = trouve["lat"], trouve["lon"]
+                a["lieu"], a["lieu_origine"] = trouve["nom"], trouve["origine"]
+                return a
+
+    trouve = lieux.extraire(a.get("titre", ""), a.get("resume", ""), gaz)
+    if trouve:
+        a["lat"], a["lon"] = trouve["lat"], trouve["lon"]
+        a["lieu"], a["lieu_origine"] = trouve["nom"], trouve["origine"]
     return a
 
 
@@ -500,12 +551,17 @@ def main(argv=None):
         bruts += collecter_toutes(cx, collecte, ref, args.hors_ligne, args.parallele,
                                   args.forcer)
 
-    # 3. Tri, puis 4. stockage dans la base
+    # 3. Tri et localisation, puis 4. stockage dans la base
     compte = {"nouveau": 0, "maj": 0, "inchange": 0, "doublon": 0, "ancien": 0}
+    gaz = lieux.charger_gazetteer()
+    geocodeur = lieux.charger_geocodeur()
+    situes = 0
     for a in bruts:
         if not a["titre"] or not a["lien"].startswith("http"):
             continue
         trier(a, ref)
+        situer(a, gaz, cx, geocodeur)
+        situes += a.get("lat") is not None
         compte[base.enregistrer(cx, a, normaliser(a["titre"]), MAINTENANT, collecte)] += 1
     base.fin_collecte(cx, collecte, base.maintenant_utc(), len(bruts), compte["nouveau"], compte["doublon"])
 
@@ -516,6 +572,9 @@ def main(argv=None):
     cx.close()
     print(f"{compte['nouveau']} nouveaux articles, {compte['doublon']} doublons écartés, "
           f"{compte['ancien']} trop anciens ignorés.")
+    if bruts:
+        print(f"Carte : {situes} articles sur {len(bruts)} placés "
+              f"({100 * situes / len(bruts):.0f} %) ; les autres restent dans la liste.")
     print(f"Base : {total} articles au total, {a_trier} à trier (uv run collecteur/admin.py a-trier).")
     print(f"Fil  : {publies} articles visibles sur le site (30 derniers jours), servis par l'API.")
     if not bruts and not total:
