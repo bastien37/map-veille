@@ -23,7 +23,13 @@ import base  # noqa: E402
 import collect  # noqa: E402
 
 
-def preparer(chemin: Path, n: int, port: int, sains: bool):
+def hote(i: int, un_seul: bool) -> str:
+    """Un domaine par flux (127.0.0.1, 127.0.0.2, …), comme 100 medias differents.
+    Tout 127.0.0.0/8 est du loopback : un seul serveur repond pour toutes ces adresses."""
+    return "127.0.0.1" if un_seul else f"127.0.0.{1 + i % 250}"
+
+
+def preparer(chemin: Path, n: int, port: int, sains: bool, un_seul_hote: bool = False):
     if chemin.exists():
         chemin.unlink()
     cx = base.ouvrir(chemin)
@@ -32,7 +38,8 @@ def preparer(chemin: Path, n: int, port: int, sains: bool):
         if sains and (i in serveur_flux.FLUX_LENTS or i in serveur_flux.FLUX_MORTS):
             continue
         base._inserer_source(cx, {"nom": f"Media {i}", "type": "rss",
-                                  "url": f"http://127.0.0.1:{port}/feed/{i}", "actif": True})
+                                  "url": f"http://{hote(i, un_seul_hote)}:{port}/feed/{i}",
+                                  "actif": True})
     cx.commit()
     cx.close()
 
@@ -44,6 +51,8 @@ def main():
     ap.add_argument("--profil", action="store_true")
     ap.add_argument("--sains", action="store_true", help="exclut les flux lents et morts")
     ap.add_argument("--repeter", type=int, default=1)
+    ap.add_argument("--un-seul-hote", action="store_true",
+                    help="tous les flux sur le meme domaine (montre l'effet du verrou par domaine)")
     a = ap.parse_args()
 
     serveur_flux.demarrer(a.port)
@@ -52,10 +61,11 @@ def main():
 
     octets = sum(len(serveur_flux.flux(i)) for i in range(a.flux))
     print(f"--- Ingestion : {a.flux} flux, {octets/1024:.0f} KiB a telecharger "
-          f"({'sains uniquement' if a.sains else '3 lents (3 s) + 2 morts (503)'}) ---")
+          f"({'sains uniquement' if a.sains else '3 lents (3 s) + 2 morts (503)'}, "
+          f"{'un seul domaine' if a.un_seul_hote else 'un domaine par flux'}) ---")
 
     for essai in range(a.repeter):
-        preparer(chemin, a.flux, a.port, a.sains)
+        preparer(chemin, a.flux, a.port, a.sains, a.un_seul_hote)
         r0 = resource.getrusage(resource.RUSAGE_SELF)
         t0, c0 = time.perf_counter(), time.process_time()
         if a.profil:

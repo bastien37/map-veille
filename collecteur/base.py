@@ -35,8 +35,8 @@ THEMES = {
     "cli": "Climat et catastrophes naturelles",
 }
 
-VERSION_SCHEMA = 5   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
-                    # v5 : index couvrants idx_articles_zone et idx_articles_source
+VERSION_SCHEMA = 6   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+                    # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs, pause_jusqu_a
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -113,7 +113,12 @@ CREATE TABLE IF NOT EXISTS sources (
     fichier_test TEXT,                           -- réponse enregistrée pour le mode --hors-ligne
     notes        TEXT,                           -- conditions d'utilisation, validation LT3…
     ajout        TEXT NOT NULL,
-    maj          TEXT NOT NULL
+    maj          TEXT NOT NULL,
+    -- v6 : état de la source d'une collecte à l'autre
+    etag           TEXT,                          -- en-tête ETag de la dernière réponse
+    derniere_modif TEXT,                          -- en-tête Last-Modified de la dernière réponse
+    echecs         INTEGER NOT NULL DEFAULT 0,    -- échecs consécutifs (disjoncteur)
+    pause_jusqu_a  TEXT                           -- source écartée des collectes jusqu'à cette date
 );
 """
 
@@ -175,6 +180,12 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
                            "CHECK (masque IN (0, 1))")
             if "nb_supprimes" not in {r["name"] for r in cx.execute("PRAGMA table_info(collectes)")}:
                 cx.execute("ALTER TABLE collectes ADD COLUMN nb_supprimes INTEGER NOT NULL DEFAULT 0")   # v4
+            colonnes_sources = {r["name"] for r in cx.execute("PRAGMA table_info(sources)")}
+            for nom, definition in (("etag", "TEXT"), ("derniere_modif", "TEXT"),      # v6
+                                    ("echecs", "INTEGER NOT NULL DEFAULT 0"),
+                                    ("pause_jusqu_a", "TEXT")):
+                if nom not in colonnes_sources:
+                    cx.execute(f"ALTER TABLE sources ADD COLUMN {nom} {definition}")
             for instruction in _instructions(INDEX):   # après les ALTER : les index les utilisent
                 cx.execute(instruction)
             for instruction in _instructions(VUES):
@@ -395,9 +406,56 @@ def lire_source(cx, source_id: int):
     return _source(r) if r else None
 
 
+# --- Disjoncteur : une source qui échoue plusieurs fois d'affilée est mise de côté ---------
+SEUIL_DISJONCTEUR = 3                      # échecs consécutifs tolérés avant la mise en pause
+PAUSE_MINIMALE = timedelta(minutes=15)     # durée de la première mise en pause
+PAUSE_MAXIMALE = timedelta(hours=24)       # plafond : une source morte est retentée chaque jour
+
+
+def duree_pause(echecs: int) -> timedelta:
+    """Pause après `echecs` échecs consécutifs : rien, puis 15 min, 30 min, 1 h… plafonné à 24 h."""
+    if echecs < SEUIL_DISJONCTEUR:
+        return timedelta(0)
+    return min(PAUSE_MINIMALE * 2 ** (echecs - SEUIL_DISJONCTEUR), PAUSE_MAXIMALE)
+
+
+def noter_etat_source(cx, source_id: int, ok: bool, maintenant: datetime,
+                      etag: str = None, derniere_modif: str = None):
+    """Mémorise les en-têtes conditionnels et tient le disjoncteur.
+
+    Un succès remet le compteur à zéro. Un échec l'incrémente et, au-delà du seuil, écarte la
+    source des collectes pendant une durée qui double à chaque fois : une source en panne
+    cesse de coûter un aller-retour réseau à chaque passage.
+    """
+    if source_id is None:
+        return
+    if ok:
+        # un 304 ne renvoie pas d'en-tête : on garde ceux de la dernière réponse complète
+        cx.execute("""UPDATE sources SET etag = COALESCE(?, etag),
+                                         derniere_modif = COALESCE(?, derniere_modif),
+                                         echecs = 0, pause_jusqu_a = NULL WHERE id = ?""",
+                   (etag, derniere_modif, source_id))
+    else:
+        ligne = cx.execute("SELECT echecs FROM sources WHERE id = ?", (source_id,)).fetchone()
+        if ligne is None:
+            return
+        echecs = (ligne["echecs"] or 0) + 1
+        pause = duree_pause(echecs)
+        cx.execute("UPDATE sources SET echecs = ?, pause_jusqu_a = ? WHERE id = ?",
+                   (echecs, (maintenant + pause).isoformat() if pause else None, source_id))
+    cx.commit()
+
+
+def source_en_pause(s: dict, maintenant: datetime) -> bool:
+    """Vrai si le disjoncteur de cette source est encore ouvert."""
+    jusqu_a = s.get("pause_jusqu_a")
+    return bool(jusqu_a) and jusqu_a > maintenant.isoformat()
+
+
 def config_collecte(s: dict) -> dict:
     """Forme attendue par les connecteurs du collecteur (type, nom, url, fichier_test, paramètres)."""
-    conf = {"type": s["type"], "nom": s["nom"], "url": s.get("url"), "fichier_test": s.get("fichier_test")}
+    conf = {"type": s["type"], "nom": s["nom"], "url": s.get("url"), "fichier_test": s.get("fichier_test"),
+            "id": s.get("id"), "etag": s.get("etag"), "derniere_modif": s.get("derniere_modif")}
     p = s.get("parametres") or {}
     if s["type"] == "gdacs":
         conf["niveaux"] = ";".join(p.get("niveaux") or ["orange", "red"])
@@ -435,6 +493,11 @@ def modifier_source(cx, source_id: int, d: dict) -> dict:
     if s["nom"] != ancienne["nom"]:
         cx.execute("UPDATE articles SET source = ? WHERE source = ?", (s["nom"], ancienne["nom"]))
         cx.execute("UPDATE collectes_sources SET source = ? WHERE source = ?", (s["nom"], ancienne["nom"]))
+    if s["url"] != ancienne.get("url"):
+        # nouvelle adresse : les en-têtes conditionnels de l'ancienne ne valent plus rien, et
+        # la source mérite d'être retentée tout de suite même si son disjoncteur était ouvert
+        cx.execute("UPDATE sources SET etag = NULL, derniere_modif = NULL, echecs = 0, "
+                   "pause_jusqu_a = NULL WHERE id = ?", (source_id,))
     cx.commit()
     return lire_source(cx, source_id)
 

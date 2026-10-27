@@ -122,7 +122,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def demarrer(port: int):
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    # 0.0.0.0 : le banc adresse les flux sur 127.0.0.1, 127.0.0.2… pour que chaque
+    # flux ait un domaine distinct, comme 100 vrais medias (verrou par domaine)
+    srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

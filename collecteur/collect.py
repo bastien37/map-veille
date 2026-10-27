@@ -12,6 +12,11 @@ Utilisation (bibliothèques gérées par uv, voir pyproject.toml) :
     uv run collecteur/collect.py                  # interroge les sources en ligne
     uv run collecteur/collect.py --hors-ligne     # utilise les fichiers de test (tests/)
     uv run collecteur/collect.py --fichiers a.xml # test sur des flux RSS enregistrés
+    uv run collecteur/collect.py --parallele 32   # plus de sources interrogées en même temps
+
+Les sources sont interrogées en parallèle (une seule à la fois par domaine). Un flux
+inchangé répond 304 grâce aux en-têtes ETag / If-Modified-Since et n'est pas retéléchargé ;
+une source qui échoue plusieurs fois d'affilée est écartée pendant un moment (disjoncteur).
 
 Les articles sont stockés dans la base SQLite donnees/map.sqlite (voir base.py).
 À chaque collecte, les articles publiés il y a plus de 30 jours sont supprimés (D05).
@@ -20,16 +25,20 @@ Le site les lit à travers l'API (serveur/app.py) : aucune donnée n'est écrite
 Seuls le titre, la source, la date et le lien sont conservés (exigence C03).
 """
 import argparse
+import collections
+import gzip
 import html
 import json
 import os
 import re
 import sys
+import threading
 import time
 import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -42,6 +51,12 @@ RACINE = Path(__file__).resolve().parent.parent
 REGLES = RACINE / "collecteur" / "regles.json"
 PAYS = RACINE / "collecteur" / "pays.json"
 POIDS_TITRE, POIDS_RESUME = 3, 1
+
+PARALLELE = 16            # sources interrogées en même temps (une seule à la fois par domaine)
+DELAI_RESEAU = 20         # secondes avant d'abandonner une requête
+TAILLE_MAX = 8 << 20      # 8 Mio : au-delà, le flux est refusé sans être chargé en mémoire
+ATTENTE_MAX = 30          # plafond du Retry-After respecté
+PAUSE_REESSAI = 2         # attente avant le 2e essai ; elle double ensuite
 UA = "MAP-EAE-veille/1.1 (projet pluridisciplinaire, Ecole de l'air et de l'espace)"
 MAINTENANT = datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -151,25 +166,81 @@ def classer(titre: str, resume: str, tables: dict):
 # ======================================================================
 # Accès réseau
 # ======================================================================
-def http(url: str, donnees: dict = None, essais: int = 3, pause: float = 6,
-         accept: str = "application/json, application/xml, text/xml, */*") -> bytes:
-    """GET (ou POST JSON si donnees). Réessaie sur 429 / 5xx, en respectant l'en-tête Retry-After."""
+class NonModifie(Exception):
+    """Le serveur a répondu 304 : le flux n'a pas changé depuis la dernière collecte."""
+
+
+_verrous_domaine = collections.defaultdict(threading.Lock)
+_verrou_domaines = threading.Lock()
+
+
+def verrou_domaine(url: str) -> threading.Lock:
+    """Un seul téléchargement à la fois par domaine : les sources sont interrogées en
+    parallèle, mais deux flux du même média ne partent jamais ensemble."""
+    hote = (urllib.parse.urlparse(url).hostname or "").lower()
+    with _verrou_domaines:
+        return _verrous_domaine[hote]
+
+
+def _lire_borne(reponse, taille_max: int) -> bytes:
+    """Lit le corps sans dépasser `taille_max` : un flux énorme, ou sans fin, ne doit pas
+    pouvoir épuiser la mémoire du collecteur."""
+    corps = reponse.read(taille_max + 1)
+    if len(corps) > taille_max:
+        raise ValueError(f"réponse de plus de {taille_max // 1024} Kio, abandonnée")
+    return corps
+
+
+def http(url: str, donnees: dict = None, essais: int = 3, pause: float = None,
+         accept: str = "application/json, application/xml, text/xml, */*",
+         etag: str = None, derniere_modif: str = None, entetes: dict = None,
+         taille_max: int = TAILLE_MAX, delai: float = DELAI_RESEAU) -> bytes:
+    """GET (ou POST JSON si donnees). Réessaie sur 429 / 5xx en respectant l'en-tête Retry-After,
+    avec une attente qui double à chaque essai.
+
+    `etag` et `derniere_modif` sont les valeurs reçues à la collecte précédente : le serveur
+    peut alors répondre 304 sans renvoyer le corps, ce qui lève NonModifie. Sur 100 flux
+    inchangés, cela économise la totalité des 2,6 Mio normalement retéléchargés.
+
+    `entetes` est renseigné en sortie avec l'ETag et le Last-Modified de la réponse, à ranger
+    dans la table sources pour la collecte suivante.
+    """
+    pause = PAUSE_REESSAI if pause is None else pause
     corps = json.dumps(donnees).encode() if donnees is not None else None
+    conditionnel = {}
+    if etag:
+        conditionnel["If-None-Match"] = etag
+    if derniere_modif:
+        conditionnel["If-Modified-Since"] = derniere_modif
     for i in range(essais):
         req = urllib.request.Request(url, data=corps, headers={
-            "User-Agent": UA, "Accept": accept,
+            "User-Agent": UA, "Accept": accept, "Accept-Encoding": "gzip",
+            **conditionnel,
             **({"Content-Type": "application/json"} if corps else {})})
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return r.read()
+            with verrou_domaine(url):
+                with urllib.request.urlopen(req, timeout=delai) as r:
+                    if entetes is not None:
+                        entetes["etag"] = r.headers.get("ETag")
+                        entetes["derniere_modif"] = r.headers.get("Last-Modified")
+                    brut = _lire_borne(r, taille_max)
+                    compresse = (r.headers.get("Content-Encoding") or "").lower() == "gzip"
+            return gzip.decompress(brut) if compresse else brut
         except urllib.error.HTTPError as e:
+            if e.code == 304:
+                raise NonModifie() from None
             if e.code in (429, 500, 502, 503, 504) and i < essais - 1:
-                attente = pause * (i + 1)
+                attente = pause * (2 ** i)
                 try:
                     attente = max(attente, float(e.headers.get("Retry-After", 0)))
                 except (TypeError, ValueError):
                     pass
-                time.sleep(min(attente, 120))
+                time.sleep(min(attente, ATTENTE_MAX))
+                continue
+            raise
+        except urllib.error.URLError:
+            if i < essais - 1:   # coupure réseau, DNS momentanément injoignable
+                time.sleep(pause * (2 ** i))
                 continue
             raise
     raise RuntimeError("échec après plusieurs essais")
@@ -186,10 +257,14 @@ def lire_json(brut: bytes, vide=None):
         raise ValueError(f"réponse non JSON : {texte[:150]!r}") from None
 
 
-def charger(source: dict, hors_ligne: bool, url: str = None, donnees: dict = None) -> bytes:
+def charger(source: dict, hors_ligne: bool, url: str = None, donnees: dict = None,
+            entetes: dict = None, conditionnel: bool = False) -> bytes:
     if hors_ligne:
         return (RACINE / source["fichier_test"]).read_bytes()
-    return http(url, donnees)
+    if conditionnel:
+        return http(url, donnees, entetes=entetes,
+                    etag=source.get("etag"), derniere_modif=source.get("derniere_modif"))
+    return http(url, donnees, entetes=entetes)
 
 
 def article(titre, lien, date, source, resume="", zone=None, theme=None, indice_theme=None):
@@ -215,8 +290,8 @@ def lire_rss(contenu: bytes, nom: str):
     return sortie
 
 
-def source_rss(s, hors_ligne):
-    return lire_rss(charger(s, hors_ligne, s["url"]), s["nom"])
+def source_rss(s, hors_ligne, entetes=None):
+    return lire_rss(charger(s, hors_ligne, s["url"], entetes=entetes, conditionnel=True), s["nom"])
 
 
 TYPES_GDACS = {"EQ": "Séisme", "TC": "Cyclone tropical", "FL": "Inondations", "VO": "Éruption volcanique",
@@ -291,11 +366,12 @@ def referentiels() -> dict:
             "pays_zone": {iso: z for z, codes in pays.items() if not z.startswith("_") for iso in codes}}
 
 
-def collecter_source(s: dict, hors_ligne: bool, ref: dict) -> list:
-    """Interroge une source (configuration issue de base.config_collecte) et renvoie ses articles."""
+def collecter_source(s: dict, hors_ligne: bool, ref: dict, entetes: dict = None) -> list:
+    """Interroge une source (configuration issue de base.config_collecte) et renvoie ses articles.
+    `entetes` reçoit l'ETag et le Last-Modified de la réponse, pour la collecte suivante."""
     t = s["type"]
     if t == "rss":
-        return source_rss(s, hors_ligne)
+        return source_rss(s, hors_ligne, entetes)
     if t == "gdacs":
         return source_gdacs(s, hors_ligne, ref["pays_zone"], ref["noms_fr"])
     if t == "reliefweb":
@@ -310,6 +386,64 @@ def trier(a: dict, ref: dict) -> dict:
     return a
 
 
+def collecter_toutes(cx, collecte: int, ref: dict, hors_ligne: bool, parallele: int) -> list:
+    """Interroge toutes les sources actives en parallèle et renvoie leurs articles.
+
+    Le réseau se fait dans un groupe de fils d'exécution ; les écritures en base restent
+    dans le fil principal, au fur et à mesure que les résultats arrivent. Les sources sont
+    parcourues dans l'ordre, donc le journal reste lisible malgré la concurrence.
+
+    Trois protections : une source en panne répétée est sautée (disjoncteur), un flux
+    inchangé répond 304 et n'est pas retéléchargé, et un seul téléchargement part à la fois
+    par domaine.
+    """
+    sources, sautees = [], 0
+    for s in base.lister_sources(cx, actives=True):
+        if hors_ligne and not s.get("fichier_test"):
+            continue   # hors ligne : seules les sources qui ont une réponse enregistrée
+        if not hors_ligne and base.source_en_pause(s, MAINTENANT):
+            base.noter_source(cx, collecte, s["nom"], False, 0,
+                              f"source en pause jusqu'au {s['pause_jusqu_a'][:16].replace('T', ' ')} UTC "
+                              f"après {s['echecs']} échecs")
+            print(f"[pause]  {s['nom']} : {s['echecs']} échecs, reprise le "
+                  f"{s['pause_jusqu_a'][:16].replace('T', ' ')} UTC")
+            sautees += 1
+            continue
+        sources.append(base.config_collecte(s))
+    if not sources:
+        return []
+
+    def interroger(s):
+        """Exécuté dans un fil d'exécution : réseau et analyse, aucune écriture en base."""
+        entetes = {}
+        try:
+            return s, collecter_source(s, hors_ligne, ref, entetes), entetes, None
+        except Exception as e:   # une source en panne ne bloque pas les autres
+            return s, None, entetes, e
+
+    bruts, inchangees = [], 0
+    with ThreadPoolExecutor(max_workers=max(1, min(parallele, len(sources)))) as pool:
+        for s, lot, entetes, erreur in pool.map(interroger, sources):
+            if erreur is None:
+                bruts += lot
+                base.noter_source(cx, collecte, s["nom"], True, len(lot))
+                base.noter_etat_source(cx, s.get("id"), True, MAINTENANT,
+                                       entetes.get("etag"), entetes.get("derniere_modif"))
+                print(f"[ok]     {s['nom']} : {len(lot)} éléments")
+            elif isinstance(erreur, NonModifie):
+                inchangees += 1
+                base.noter_source(cx, collecte, s["nom"], True, 0, "inchangé depuis la dernière collecte")
+                base.noter_etat_source(cx, s.get("id"), True, MAINTENANT)
+                print(f"[304]    {s['nom']} : inchangé, rien à retélécharger")
+            else:
+                base.noter_source(cx, collecte, s["nom"], False, 0, str(erreur))
+                base.noter_etat_source(cx, s.get("id"), False, MAINTENANT)
+                print(f"[erreur] {s['nom']} : {erreur}")
+    if inchangees or sautees:
+        print(f"{inchangees} flux inchangés (304), {sautees} sources en pause (disjoncteur).")
+    return bruts
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Collecte et tri des actualités pour MAP")
     ap.add_argument("--hors-ligne", action="store_true", help="utilise les fichiers de test au lieu des API")
@@ -317,7 +451,12 @@ def main(argv=None):
     ap.add_argument("--base", default=str(base.BASE), help="base SQLite (défaut : donnees/map.sqlite)")
     ap.add_argument("--migrer", default=str(base.ANCIEN_JSON),
                     help="ancien data.json repris si la base est vide (migration)")
+    ap.add_argument("--parallele", type=int, default=PARALLELE, metavar="N",
+                    help=f"sources interrogées en même temps (défaut : {PARALLELE}, "
+                         "une seule à la fois par domaine)")
     args = ap.parse_args(argv)
+    if args.parallele < 1:
+        ap.error("--parallele doit valoir au moins 1")
 
     ref = referentiels()
 
@@ -340,17 +479,7 @@ def main(argv=None):
             base.noter_source(cx, collecte, nom or Path(chemin).stem, True, len(lot))
             bruts += lot
     else:
-        for s in map(base.config_collecte, base.lister_sources(cx, actives=True)):
-            if args.hors_ligne and not s.get("fichier_test"):
-                continue   # hors ligne : seules les sources qui ont une réponse enregistrée
-            try:
-                lot = collecter_source(s, args.hors_ligne, ref)
-                bruts += lot
-                base.noter_source(cx, collecte, s["nom"], True, len(lot))
-                print(f"[ok]     {s['nom']} : {len(lot)} éléments")
-            except Exception as e:   # une source en panne ne bloque pas les autres
-                base.noter_source(cx, collecte, s["nom"], False, 0, str(e))
-                print(f"[erreur] {s['nom']} : {e}")
+        bruts += collecter_toutes(cx, collecte, ref, args.hors_ligne, args.parallele)
 
     # 3. Tri, puis 4. stockage dans la base
     compte = {"nouveau": 0, "maj": 0, "inchange": 0, "doublon": 0, "ancien": 0}
