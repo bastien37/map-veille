@@ -63,6 +63,30 @@ svg{display:block;width:100%;height:auto}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;font-size:.78rem;color:var(--muted);font-family:var(--mono)}
 .scale{display:flex;gap:2px}.scale i{width:22px;height:10px;display:block}
 .zonelist{display:none;flex-wrap:wrap;gap:6px}
+/* carte à points */
+.carte{height:min(68vh,640px);min-height:340px;border-radius:4px;background:var(--land);z-index:0}
+.carte:focus-visible{outline:2px solid var(--new);outline-offset:2px}
+.etat{margin:0;font-family:var(--mono);font-size:.78rem;color:var(--muted);min-height:1.2em}
+.leaflet-container{font:inherit;background:var(--land)}
+.leaflet-popup-content-wrapper,.leaflet-control-attribution{background:var(--panel);color:var(--ink)}
+.leaflet-control-attribution a{color:var(--accent)}
+.leaflet-bar a{background:var(--panel);color:var(--ink);border-bottom-color:var(--line)}
+.leaflet-bar a:hover{background:var(--bg)}
+.agregat div{width:36px;height:36px;margin:2px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:var(--accent);color:var(--panel);font-family:var(--display);font-weight:700;border:2px solid var(--panel)}
+.agregat-moyen div{width:42px;height:42px;background:var(--heat3)}
+.agregat-grand div{width:50px;height:50px;background:var(--heat4);font-size:1.05rem}
+/* panneau des sources d'un événement */
+#panneau{border-bottom:1px solid var(--line);background:var(--bg)}
+.panneau-tete{padding:12px 16px;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+.panneau-tete h3{font-family:var(--display);font-size:1.15rem;margin:0;flex:1 1 auto}
+.panneau-tete p{margin:0;font-family:var(--mono);font-size:.76rem;color:var(--muted);flex:1 1 100%}
+.sources{list-style:none;margin:0;padding:0;max-height:46vh;overflow-y:auto}
+.sources li{padding:10px 16px;border-top:1px solid var(--line)}
+.sources h4{font-size:.94rem;font-weight:600;margin:0 0 3px;line-height:1.35}
+.lien-evenement{font:inherit;font-size:.72rem;font-family:var(--mono);background:none;border:none;
+  color:var(--accent);cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:3px}
+.lien-evenement:focus-visible{outline:2px solid var(--new);outline-offset:2px}
 .feed{background:var(--panel);border:1px solid var(--line);border-radius:6px;display:flex;flex-direction:column;min-width:0;max-height:720px}
 .feedhead{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
 .feedhead h2{font-family:var(--display);font-weight:700;font-size:1.3rem;margin:0;letter-spacing:.02em}
@@ -80,6 +104,8 @@ li h3{font-size:.98rem;font-weight:600;margin:0;line-height:1.35}
 footer{font-size:.78rem;color:var(--muted);max-width:75ch}
 @media (max-width:820px){
   .grid{grid-template-columns:1fr}
+  .carte{height:56vh;min-height:300px}
+  .sources{max-height:none}
   .zonelist{display:flex}
   .tag .t{display:none}
   .feed{max-height:none}
@@ -99,13 +125,27 @@ footer{font-size:.78rem;color:var(--muted);max-width:75ch}
     </div>
   </header>
 
+  <div class="bar" id="vues">
+    <span class="lbl" id="lbl-vue">Vue</span>
+    <button class="chip" data-vue="points" aria-pressed="true">Carte des points</button>
+    <button class="chip" data-vue="zones" aria-pressed="false">Carte des zones</button>
+    <button class="chip" data-vue="liste" aria-pressed="false">Liste seule</button>
+    <span class="lbl" id="lbl-periode">Période</span>
+    <button class="chip" data-jours="1" aria-pressed="false">24 h</button>
+    <button class="chip" data-jours="7" aria-pressed="false">7 jours</button>
+    <button class="chip" data-jours="30" aria-pressed="true">30 jours</button>
+  </div>
+
   <div class="bar" id="themes"><span class="lbl">Thème</span></div>
 
   <div class="grid">
-    <section class="mapbox" aria-label="Carte des zones">
-      <svg class="map" id="map" viewBox="0 0 960 480" role="group" aria-label="Carte du monde par zones, cliquez une zone pour filtrer"></svg>
-      <div class="zonelist" id="zonelist"></div>
-      <div class="legend">
+    <section class="mapbox" id="mapbox" aria-label="Carte">
+      <div class="carte" id="carte-points" tabindex="0"></div>
+      <svg class="map" id="map" viewBox="0 0 960 480" role="group" hidden
+           aria-label="Carte du monde par zones, cliquez une zone pour filtrer"></svg>
+      <p class="etat" id="carte-etat" role="status" aria-live="polite"></p>
+      <div class="zonelist" id="zonelist" hidden></div>
+      <div class="legend" id="legende-zones" hidden>
         <span>Nombre d'informations :</span>
         <span class="scale"><i style="background:var(--land)"></i><i style="background:var(--heat1)"></i><i style="background:var(--heat2)"></i><i style="background:var(--heat3)"></i><i style="background:var(--heat4)"></i></span>
         <span>peu → beaucoup</span>
@@ -118,6 +158,7 @@ footer{font-size:.78rem;color:var(--muted);max-width:75ch}
         <h2 id="ftitle">Toutes les zones</h2>
         <p id="fcount"></p>
       </div>
+      <div id="panneau" hidden></div>
       <ol id="list"></ol>
     </section>
   </div>
@@ -129,7 +170,9 @@ footer{font-size:.78rem;color:var(--muted);max-width:75ch}
 // Aucune donnée dans ce fichier : zones, thèmes, tracé de la carte et actualités viennent de l'API.
 const API="api";   // même serveur que la page (voir serveur/app.py)
 const PAS=150;
-let ZONES=[], THEMES=[], fZone=null, fTheme=null, limite=PAS, requete=0;
+let ZONES=[], THEMES=[], CARTE=null, fZone=null, fTheme=null, fJours=30, limite=PAS, requete=0;
+let vue="points";          // points | zones | liste
+let carte=null;            // module site/carte.js, importé à la première vue « points »
 const $=s=>document.querySelector(s);
 const fmtH=d=>new Date(d).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -147,7 +190,7 @@ const NS="http://www.w3.org/2000/svg", svg=$("#map");
 const el=(n,a={},p)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e};
 
 function construire(ref){
-  ZONES=ref.zones; THEMES=ref.themes;
+  ZONES=ref.zones; THEMES=ref.themes; CARTE=ref.carte;
   $("#legende-nouveau").textContent=`● Nouveau = ajouté depuis moins de ${ref.duree_nouveau_heures} h`;
   const tags=el("g");
   ZONES.forEach(z=>{
@@ -162,12 +205,69 @@ function construire(ref){
     const b=document.createElement("button");b.className="chip";b.textContent=z.nom;b.dataset.z=z.code;b.onclick=()=>setZone(z.code);$("#zonelist").appendChild(b);
   });
   svg.appendChild(tags);
-  THEMES.forEach(t=>{const b=document.createElement("button");b.className="chip";b.textContent=t.nom;b.dataset.t=t.code;b.setAttribute("aria-pressed","false");b.onclick=()=>{fTheme=fTheme===t.code?null:t.code;actualiser()};$("#themes").appendChild(b)});
-  const reset=document.createElement("button");reset.className="reset";reset.textContent="Tout afficher";reset.onclick=()=>{fZone=null;fTheme=null;actualiser()};$("#themes").appendChild(reset);
+  THEMES.forEach(t=>{const b=document.createElement("button");b.className="chip";b.textContent=t.nom;b.dataset.t=t.code;b.setAttribute("aria-pressed","false");b.onclick=()=>{fTheme=fTheme===t.code?null:t.code;if(carte)carte.appliquerFiltres({theme:fTheme});actualiser()};$("#themes").appendChild(b)});
+  const reset=document.createElement("button");reset.className="reset";reset.textContent="Tout afficher";reset.onclick=()=>{fZone=null;fTheme=null;if(carte)carte.appliquerFiltres({theme:null});actualiser()};$("#themes").appendChild(reset);
 }
 
 function setZone(c){fZone=fZone===c?null:c;actualiser()}
-document.addEventListener("click",e=>{if(e.target.id==="plus")afficherPlus()});
+
+// ---------- bascule entre les trois vues ----------
+// Le module de carte et Leaflet ne sont téléchargés qu'à la première ouverture de la vue
+// « points » : un visiteur qui reste sur la liste ne paie pas ces 200 Kio.
+async function setVue(v){
+  vue=v;
+  document.querySelectorAll("#vues .chip[data-vue]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.vue===v));
+  $("#carte-points").hidden = v!=="points";
+  $("#map").hidden = v!=="zones";
+  $("#zonelist").hidden = v!=="zones";
+  $("#legende-zones").hidden = v!=="zones";
+  $("#mapbox").hidden = v==="liste";
+  $("#carte-etat").hidden = v==="zones";
+  if(v!=="points"){ fermerPanneau(); return; }
+  try{
+    if(!carte){
+      $("#carte-etat").textContent="Chargement de la carte…";
+      carte=await import("./carte.js");
+      await carte.creer($("#carte-points"), CARTE, {surSelection:ouvrirEvenement});
+    }
+    carte.appliquerFiltres({theme:fTheme, jours:fJours});
+    carte.invalider();     // le conteneur était caché : Leaflet doit remesurer
+  }catch(e){
+    $("#carte-etat").textContent="La carte n'a pas pu être chargée ; la liste reste disponible.";
+    carte=null;
+  }
+}
+
+function setJours(j){
+  fJours=j;
+  document.querySelectorAll("#vues .chip[data-jours]").forEach(b=>b.setAttribute("aria-pressed",+b.dataset.jours===j));
+  if(carte)carte.appliquerFiltres({jours:j});
+  actualiser();
+}
+
+// ---------- panneau des sources d'un événement ----------
+async function ouvrirEvenement(id){
+  const p=$("#panneau");
+  p.hidden=false; p.innerHTML='<div class="panneau-tete"><h3>Chargement…</h3></div>';
+  try{
+    const e=await carte.chargerEvenement(id);
+    p.innerHTML=carte.htmlPanneau(e);
+    p.querySelector("#fermer-panneau")?.focus();
+  }catch(err){
+    p.innerHTML=`<div class="panneau-tete"><h3>Sources indisponibles</h3>
+      <p>${esc(err.message)}</p><button class="chip" id="fermer-panneau">Fermer</button></div>`;
+  }
+}
+function fermerPanneau(){const p=$("#panneau");p.hidden=true;p.innerHTML=""}
+
+document.addEventListener("click",e=>{
+  if(e.target.id==="plus")afficherPlus();
+  if(e.target.id==="fermer-panneau")fermerPanneau();
+  if(e.target.dataset?.vue)setVue(e.target.dataset.vue);
+  if(e.target.dataset?.jours)setJours(+e.target.dataset.jours);
+  if(e.target.classList?.contains("lien-evenement"))ouvrirEvenement(+e.target.dataset.evt);
+});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#panneau").hidden)fermerPanneau()});
 
 // ---------- affichage ----------
 function dessinerCarte(syn){
@@ -206,7 +306,10 @@ function placerEtiquettes(){
 const ligne=i=>`<li>
     ${i.nouveau?'<span class="badge">Nouveau</span>':""}
     <h3>${esc(i.titre)}</h3>
-    <div class="meta"><span>${esc(i.source)}</span><span>${fmtH(i.date)}</span><span>${esc(zNom(i.zone))}</span><span>${esc(tNom(i.theme))}</span><a href="${esc(i.lien)}" target="_blank" rel="noopener">Lire l'article ↗</a></div>
+    <div class="meta"><span>${esc(i.source)}</span><span>${fmtH(i.date)}</span>${
+      i.lieu?`<span>${esc(i.lieu)}</span>`:""}<span>${esc(tNom(i.theme))}</span>${
+      i.nb_sources>1?`<button class="lien-evenement" data-evt="${i.evenement_id}">${i.nb_sources} sources</button>`:""
+      }<a href="${esc(i.lien)}" target="_blank" rel="noopener">Lire l'article ↗</a></div>
   </li>`;
 let affiches=0, totalFil=0;
 function bouton(){const reste=totalFil-affiches;return reste>0?`<li class="more"><button class="chip" id="plus">Afficher ${Math.min(PAS,reste)} de plus (${reste} restantes)</button></li>`:""}
@@ -222,7 +325,7 @@ function dessinerFil(res){
 async function afficherPlus(){
   const b=$("#plus"); if(b){b.disabled=true;b.textContent="Chargement…"}
   try{
-    const res=await api("articles",{zone:fZone,theme:fTheme,limite:PAS,decalage:affiches});
+    const res=await api("articles",{zone:fZone,theme:fTheme,jours:fJours,limite:PAS,decalage:affiches});
     affiches+=res.articles.length;
     $(".more")?.remove();
     $("#list").insertAdjacentHTML("beforeend",res.articles.map(ligne).join("")+bouton());
@@ -238,7 +341,8 @@ async function actualiser(){
   const n=++requete;
   $("#list").setAttribute("aria-busy","true");
   try{
-    const [syn,res]=await Promise.all([api("synthese",{theme:fTheme}),api("articles",{zone:fZone,theme:fTheme,limite:PAS})]);
+    const [syn,res]=await Promise.all([api("synthese",{theme:fTheme,jours:fJours}),
+                                      api("articles",{zone:fZone,theme:fTheme,jours:fJours,limite:PAS})]);
     if(n!==requete)return;          // une requête plus récente a été lancée entre-temps
     dessinerCarte(syn); dessinerFil(res);
   }catch(e){ if(n===requete)erreur(e) }
@@ -249,6 +353,7 @@ async function actualiser(){
   $("#list").innerHTML='<li class="empty">Chargement des actualités…</li>';
   try{ construire(await api("referentiel")); }catch(e){ erreur(e); return; }
   await actualiser();
+  setVue("points");
   // les polices changent la largeur du texte : on replace les étiquettes, sans
   // redemander les données (ce rappel coûtait 2 appels API et 32 Kio par visite)
   if(document.fonts)document.fonts.ready.then(placerEtiquettes);

@@ -113,3 +113,49 @@ def test_les_polices_ne_bloquent_pas_le_rendu(client):
     page = client.get("/").text
     assert 'media="print" onload="this.media=\'all\'"' in page
     assert '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' in page
+
+
+# ---------- carte à points ----------
+def test_la_carte_est_la_vue_par_defaut(client):
+    page = client.get("/").text
+    assert 'data-vue="points" aria-pressed="true"' in page
+    assert 'data-vue="zones"' in page and 'data-vue="liste"' in page
+
+
+def test_leaflet_est_servi_par_le_site_pas_par_un_cdn(client):
+    """Aucune dépendance extérieure au chargement : les bibliothèques sont dans site/vendor."""
+    for fichier, type_attendu in [("/vendor/leaflet.js", "javascript"),
+                                  ("/vendor/leaflet.css", "css"),
+                                  ("/vendor/leaflet.markercluster.js", "javascript"),
+                                  ("/vendor/MarkerCluster.Default.css", "css"),
+                                  ("/vendor/images/marker-icon.png", "image"),
+                                  ("/carte.js", "javascript")]:
+        r = client.get(fichier)
+        assert r.status_code == 200, fichier
+        assert type_attendu in r.headers["content-type"]
+    source = (RACINE / "site" / "carte.js").read_text(encoding="utf-8")
+    page = client.get("/").text
+    for interdit in ("unpkg.com", "cdnjs", "jsdelivr", "cdn."):
+        assert interdit not in source and interdit not in page
+
+
+def test_les_licences_des_bibliotheques_sont_livrees(client):
+    for f in ("/vendor/LICENSE-leaflet.txt", "/vendor/LICENSE-markercluster.txt"):
+        assert client.get(f).status_code == 200
+
+
+def test_la_carte_est_chargee_a_la_demande(client):
+    """Ni Leaflet ni carte.js ne doivent être référencés dans le HTML : un visiteur qui
+    reste sur la liste ne doit pas les télécharger."""
+    page = client.get("/").text
+    assert "vendor/leaflet.js" not in page
+    assert 'src="carte.js"' not in page and "<script src=" not in page
+    assert 'await import("./carte.js")' in page
+
+
+def test_le_referentiel_porte_la_configuration_de_la_carte(client):
+    carte = client.get("/api/referentiel").json()["carte"]
+    assert carte["tuiles"]["url"].startswith("http")
+    assert "OpenStreetMap" in carte["tuiles"]["attribution"]   # citation obligatoire
+    assert carte["vue_initiale"]["zoom"] >= 1 and carte["points_max"] > 0
+    assert "_commentaire" not in carte

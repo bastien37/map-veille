@@ -1,0 +1,11 @@
+{
+  "_commentaire": "Fond de carte. Par défaut les tuiles d'OpenStreetMap, gratuites et sans clé, dont la politique d'usage demande (1) de citer la source — c'est fait par « attribution » ci-dessous, affiché en permanence sur la carte — et (2) de rester sur un trafic modeste. Pour un site qui marche, ou pour se passer de tout service extérieur, installer son propre serveur de tuiles sur le VPS et mettre son adresse ici.\n\nLeaflet et Leaflet.markercluster sont servis par le site lui-même (site/vendor/), pas par un CDN : aucune requête vers un tiers n'est nécessaire au chargement de la page.",
+  "tuiles": {
+    "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "attribution": "Fond de carte © contributeurs <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a>",
+    "zoom_max": 18
+  },
+  "vue_initiale": { "lat": 25, "lon": 10, "zoom": 2 },
+  "rayon_agregat_px": 55,
+  "points_max": 600
+}

@@ -153,8 +153,8 @@ _carte_datee = None
 @app.get("/api/referentiel", summary="Zones (avec leur tracé sur la carte) et thèmes")
 def referentiel(requete: Request, cx: sqlite3.Connection = Depends(connexion)):
     global _referentiel, _carte_datee
-    datee = CARTE.stat().st_mtime_ns
-    if _referentiel is None or datee != _carte_datee:   # carte.json modifiée : on reconstruit
+    datee = (CARTE.stat().st_mtime_ns, base.CARTE_JSON.stat().st_mtime_ns)
+    if _referentiel is None or datee != _carte_datee:   # fichier modifié : on reconstruit
         _carte_datee = datee
         carte = json.loads(CARTE.read_text(encoding="utf-8"))["zones"]
         zones = [{"code": r["code"], "nom": r["nom"], **carte.get(r["code"], {})}
@@ -165,8 +165,11 @@ def referentiel(requete: Request, cx: sqlite3.Connection = Depends(connexion)):
         # les autres restent en base pour ne pas perdre les articles déjà classés
         themes = [{"code": t["code"], "nom": t["nom"]}
                   for t in base.THEMES_DECLARES if t["actif"]]
-        corps, etag = serialiser({"zones": zones, "themes": themes,
-                                  "duree_nouveau_heures": int(base.DUREE_NOUVEAU.total_seconds() // 3600)})
+        carte_conf = json.loads(base.CARTE_JSON.read_text(encoding="utf-8"))
+        corps, etag = serialiser({
+            "zones": zones, "themes": themes,
+            "duree_nouveau_heures": int(base.DUREE_NOUVEAU.total_seconds() // 3600),
+            "carte": {k: v for k, v in carte_conf.items() if not k.startswith("_")}})
         _referentiel = (corps, gzip.compress(corps, 6), etag)
     corps, corps_gzip, etag = _referentiel
     return reponse(corps, etag, CACHE_REFERENTIEL, requete, corps_gzip)
@@ -250,8 +253,15 @@ def articles(requete: Request, zone: Optional[str] = None, theme: Optional[str] 
                            "nb_sources": e["nb_sources"], "lieu": e["lieu"],
                            "lat": e["lat"], "lon": e["lon"],
                            "zone": e["zone"], "theme": e["theme"]})
-    total_evt = cx.execute(f"SELECT COUNT(*) FROM evenements e WHERE {ou_evt}", p_evt).fetchone()[0]
-    return avec_cache({"total": total_evt, "total_articles": total, "nouveaux": nouveaux,
+    # En vue groupée, « nouveaux » doit compter des ÉVÉNEMENTS récents, pas des articles :
+    # afficher « 16 informations · 26 nouvelles » n'a aucun sens pour le lecteur.
+    total_evt, nouveaux_evt = cx.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(recent), 0) FROM (
+              SELECT EXISTS (SELECT 1 FROM fil f
+                             WHERE f.evenement_id = e.id AND f.ajout >= ?) AS recent
+              FROM evenements e WHERE {ou_evt})""", [seuil_nouveau, *p_evt]).fetchone()
+    return avec_cache({"total": total_evt, "nouveaux": nouveaux_evt,
+                       "total_articles": total, "nouveaux_articles": nouveaux,
                        "decalage": decalage, "groupe": True, "articles": sortie},
                       CACHE_FIL, requete)
 

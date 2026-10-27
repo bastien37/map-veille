@@ -20,6 +20,7 @@ ANCIEN_JSON = RACINE / "site" / "data.json"   # ancien format, lu une seule fois
 CONFIG = RACINE / "config"
 THEMES_JSON = CONFIG / "themes.json"
 GEOCODAGE_JSON = CONFIG / "geocodage.json"
+CARTE_JSON = CONFIG / "carte.json"
 FLUX_JSON = CONFIG / "flux.json"
 DUREE_FIL = timedelta(days=30)   # D05 : durée de conservation ; au-delà, l'article est supprimé à la collecte
 DUREE_NOUVEAU = timedelta(hours=48)   # F06 : repère « Nouveau »
