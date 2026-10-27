@@ -32,8 +32,14 @@ def test_referentiel(client):
 def test_synthese(client):
     r = client.get("/api/synthese").json()
     assert r["total"] == 3
-    assert r["zones"]["asi"] == {"total": 1, "nouveaux": 1}
+    assert "zones" not in r          # comptages par zone désormais facultatifs
     assert client.get("/api/synthese", params={"theme": "cli"}).json()["total"] == 3
+
+
+def test_synthese_avec_les_zones(client):
+    r = client.get("/api/synthese", params={"zones": "1"}).json()
+    assert r["zones"]["asi"] == {"total": 1, "nouveaux": 1}
+    assert sum(z["total"] for z in r["zones"].values()) == r["total"]
 
 
 def test_articles_filtres_et_pagination(client):
@@ -135,7 +141,7 @@ def test_la_carte_des_zones_a_disparu_du_site(client):
     # mais la zone est toujours là où elle sert
     assert len(client.get("/api/referentiel").json()["zones"]) == 6
     assert client.get("/api/articles", params={"zone": "eur"}).status_code == 200
-    assert client.get("/api/synthese").json()["zones"]["eur"] is not None
+    assert client.get("/api/synthese", params={"zones": "1"}).json()["zones"]["eur"] is not None
 
 
 def test_leaflet_est_servi_par_le_site_pas_par_un_cdn(client):

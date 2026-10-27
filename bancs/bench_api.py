@@ -69,6 +69,6 @@ def mesurer(port, base_sqlite, titre):
 
 
 if __name__ == "__main__":
-    mesurer(8930, BENCH / "api_5k.sqlite", "Base 5 000 articles (echelle actuelle : 5 sources)")
-    mesurer(8931, BENCH / "api_50k.sqlite", "Base 50 000 articles (~40 flux x 30 j)")
-    mesurer(8932, BENCH / "api_200k.sqlite", "Base 200 000 articles (100 flux x 30 j, cible)")
+    mesurer(8950, BENCH / "api_5k.sqlite", "Base 5 000 articles (echelle actuelle : 5 sources)")
+    mesurer(8951, BENCH / "api_50k.sqlite", "Base 50 000 articles (~40 flux x 30 j)")
+    mesurer(8952, BENCH / "api_200k.sqlite", "Base 200 000 articles (100 flux x 30 j, cible)")

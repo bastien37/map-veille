@@ -43,6 +43,24 @@ def gen(chemin: Path, n: int, jours: int = 30, graine: int = 42):
                        maintenant.isoformat(), cid))
     cx.executemany("""INSERT INTO articles (lien, titre, titre_norm, source, date_pub, zone, theme,
                       masque, ajout, maj, collecte_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)""", lignes)
+    # Evenements : environ 3 articles par evenement, comme une collecte reelle (sur le banc
+    # de flux, 3 920 articles donnent 1 300 evenements environ). Sans eux, le fil groupe
+    # renverrait une liste vide et la mesure n'aurait aucun sens.
+    if "evenements" in {r[0] for r in cx.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}:
+        n_evt = max(1, n // 3)
+        cx.executemany(
+            "INSERT INTO evenements (id,titre,titre_norm,lat,lon,lieu,zone,theme,date_debut,"
+            "date_fin,nb_sources,maj) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            [(i, f"Evenement {i}", f"evenement {i}",
+              rnd.uniform(-60, 70), rnd.uniform(-180, 180), f"Lieu {i}",
+              rnd.choice(zones), rnd.choice(themes),
+              (maintenant - timedelta(seconds=rnd.randint(0, jours * 86400))).isoformat(),
+              (maintenant - timedelta(seconds=rnd.randint(0, jours * 86400))).isoformat(),
+              0, maintenant.isoformat()) for i in range(1, n_evt + 1)])
+        cx.execute("UPDATE articles SET evenement_id = 1 + (id % ?)", (n_evt,))
+        cx.execute("UPDATE evenements SET nb_sources = "
+                   "(SELECT COUNT(*) FROM fil WHERE evenement_id = evenements.id)")
     base.fin_collecte(cx, cid, maintenant, n, n, 0)
     cx.commit()
     cx.execute("ANALYZE")

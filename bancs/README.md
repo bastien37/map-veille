@@ -17,7 +17,10 @@ politique réseau bloque les hôtes externes.
 | `gen_base.py` | Génère des bases SQLite réalistes de 5 000, 50 000 et 200 000 articles |
 | `bench_api.py` | Latences p50/p95/p99 et taille des réponses de chaque route, aux trois volumes |
 | `bench_sql.py` | Plans d'exécution SQLite, effet mesuré d'un index composite, taux de compression |
-| `bench_bbox.py` | Requêtes par bbox de la future carte à points : sans index spatial, avec B-tree, avec R*Tree |
+| `bench_bbox.py` | Requêtes par bbox de la carte à points : sans index spatial, avec B-tree, avec R*Tree |
+| `bench_carte.py` | Fil groupé et requêtes de carte au volume cible, avec les formes écartées |
+| `bench_lieux.py` | Precision et rappel de la localisation, sur le corpus annoté |
+| `bench_accessibilite.mjs` | Contrastes (clair et sombre), clavier, structure, largeur téléphone |
 | `bench_front.mjs` | Chargement de la page : requêtes, octets, premier affichage (Playwright) |
 | `proto_tri.py` | Prototype du tri en un seul balayage + **vérification d'équivalence stricte** avec `collect.classer` |
 | `proto_py.py` | Prototype Python optimisé (téléchargement concurrent + tri rapide) |
@@ -52,4 +55,8 @@ cd bancs/go && go run . 8910 32           # Go
 
 Les bases produites (`bancs/*.sqlite`) sont ignorées par git.
 
-Résultats : `RAPPORT-phase1.md` (audit) et `DECISION-phase2.md` (langage et stockage).
+Résultats : `RAPPORT-phase1.md` (audit de départ), `DECISION-phase2.md` (langage et
+stockage) et `RESULTATS-phase4.md` (tableau avant / après).
+
+Les tests réseau et les bancs montent un serveur local : il faut lever la protection
+SSRF avec `MAP_AUTORISER_RESEAU_LOCAL=1`.

@@ -199,26 +199,38 @@ def referentiel(requete: Request, cx: sqlite3.Connection = Depends(connexion)):
 @app.get("/api/synthese", summary="Nombre d'articles et de nouveautés par zone (coloration de la carte)")
 def synthese(requete: Request, theme: Optional[str] = None, themes: Optional[str] = None,
              jours: int = Query(30, ge=1, le=365),
+             zones: bool = Query(False, description="ajouter les comptages par zone"),
              cx: sqlite3.Connection = Depends(connexion)):
+    """Date de la dernière collecte, sources actives, et comptages.
+
+    Les comptages PAR ZONE sont facultatifs (`zones=1`) : plus rien sur le site ne les
+    utilise depuis que la carte à points a remplacé celle des six zones, et ils coûtent un
+    balayage complet de la fenêtre — 80 ms sur 200 000 articles pour une donnée que
+    personne ne lit.
+    """
     codes = themes_demandes(theme, themes)
     where, params = filtre_sql(None, None, jours, themes=codes)
     seuil_nouveau = (maintenant() - base.DUREE_NOUVEAU).isoformat()
-    lignes = cx.execute(
-        f"""SELECT zone, COUNT(*) AS total, SUM(ajout >= ?) AS nouveaux
-            FROM fil WHERE {where} GROUP BY zone""", [seuil_nouveau, *params]).fetchall()
-    par_zone = {code: {"total": 0, "nouveaux": 0} for code in base.ZONES}
-    for r in lignes:
-        par_zone[r["zone"]] = {"total": r["total"], "nouveaux": r["nouveaux"] or 0}
+    sortie = {}
+    if zones:
+        lignes = cx.execute(
+            f"""SELECT zone, COUNT(*) AS total, SUM(ajout >= ?) AS nouveaux
+                FROM fil WHERE {where} GROUP BY zone""", [seuil_nouveau, *params]).fetchall()
+        par_zone = {code: {"total": 0, "nouveaux": 0} for code in base.ZONES}
+        for r in lignes:
+            par_zone[r["zone"]] = {"total": r["total"], "nouveaux": r["nouveaux"] or 0}
+        sortie["zones"] = par_zone
     derniere = cx.execute("SELECT fin FROM collectes WHERE fin IS NOT NULL AND hors_ligne = 0 "
                           "ORDER BY id DESC LIMIT 1").fetchone()
-    sources = [r[0] for r in cx.execute(
-        f"SELECT source, COUNT(*) n FROM fil WHERE {where} GROUP BY source ORDER BY n DESC", params)]
+    comptes = cx.execute(
+        f"SELECT source, COUNT(*) n FROM fil WHERE {where} GROUP BY source ORDER BY n DESC",
+        params).fetchall()
     if not derniere:   # pas encore de collecte en ligne : date du dernier ajout en base
         derniere = cx.execute("SELECT MAX(ajout) AS fin FROM articles").fetchone()
     return avec_cache({"mise_a_jour": derniere["fin"] if derniere else None,
-                       "zones": par_zone,
-                       "total": sum(z["total"] for z in par_zone.values()),
-                       "sources": sources}, CACHE_FIL, requete)
+                       "total": sum(r["n"] for r in comptes),
+                       "sources": [r["source"] for r in comptes], **sortie},
+                      CACHE_FIL, requete)
 
 
 @app.get("/api/articles", summary="Fil d'actualité filtré, du plus récent au plus ancien")
@@ -235,11 +247,13 @@ def articles(requete: Request, zone: Optional[str] = None, theme: Optional[str] 
     """
     verifier(zone, None)
     codes = themes_demandes(theme, themes)
-    where, params = filtre_sql(zone, None, jours, themes=codes)
     seuil_nouveau = (maintenant() - base.DUREE_NOUVEAU).isoformat()
-    total, nouveaux = cx.execute(f"SELECT COUNT(*), COALESCE(SUM(ajout >= ?), 0) FROM fil WHERE {where}",
-                                 [seuil_nouveau, *params]).fetchone()
+
     if not grouper:
+        where, params = filtre_sql(zone, None, jours, themes=codes)
+        total, nouveaux = cx.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(ajout >= ?), 0) FROM fil WHERE {where}",
+            [seuil_nouveau, *params]).fetchone()
         lignes = cx.execute(
             f"""SELECT id, titre, source, date_pub AS date, zone, theme, lien, evenement_id,
                        ajout >= ? AS nouveau
@@ -250,41 +264,57 @@ def articles(requete: Request, zone: Optional[str] = None, theme: Optional[str] 
                            "articles": [dict(r, nouveau=bool(r["nouveau"])) for r in lignes]},
                           CACHE_FIL, requete)
 
-    # Vue groupée : on part de la table des événements, bien plus petite que celle des
-    # articles, puis on va chercher l'article le plus récent de chacun pour le titre, la
-    # source et le lien affichés. Une fenêtre glissante sur tous les articles donnerait le
-    # même résultat mais devrait tous les parcourir.
+    # Vue groupée. Tout se lit dans la table des événements, trois fois plus petite que
+    # celle des articles, en TROIS requêtes quel que soit le nombre de lignes affichées :
+    # les compteurs, la page d'événements, puis l'article représentatif de chacun.
+    #
+    # La première version faisait une requête par événement affiché, soit 150 allers-retours
+    # par page : 561 ms au 95e centile sur 200 000 articles, plus lent que l'ancien fil non
+    # groupé. C'est la forme ci-dessous qui est mesurée dans bancs/bench_api.py.
     ou_evt, p_evt = filtre_sql(zone, None, jours, "e.", "date_fin", themes=codes)
-    # EXISTS dans la clause WHERE, et pas un filtre après coup : un événement dont toutes
-    # les sources ont été masquées ne doit ni être compté dans le total, ni occuper une
+    # nb_sources dans la clause WHERE, et pas un filtre après coup : un événement dont
+    # toutes les sources ont été masquées ne doit ni compter dans le total, ni occuper une
     # place dans la page — sinon la pagination renverrait des pages trop courtes.
     ou_evt += " AND e.nb_sources > 0"
+
+    # e.maj est posé à chaque rattachement d'article : « modifié depuis moins de 48 h »
+    # revient donc à « a reçu un article récemment », sans sous-requête par événement.
+    total_evt, nouveaux_evt, total_articles = cx.execute(
+        f"""SELECT COUNT(*), COALESCE(SUM(e.maj >= ?), 0), COALESCE(SUM(e.nb_sources), 0)
+            FROM evenements e WHERE {ou_evt}""", [seuil_nouveau, *p_evt]).fetchone()
+
     evts = cx.execute(
-        f"""SELECT e.id, e.lieu, e.lat, e.lon, e.zone, e.theme,
-                   e.nb_sources
+        f"""SELECT e.id, e.lieu, e.lat, e.lon, e.zone, e.theme, e.nb_sources
             FROM evenements e WHERE {ou_evt}
             ORDER BY e.date_fin DESC LIMIT ? OFFSET ?""",
         [*p_evt, limite, decalage]).fetchall()
+
+    representants = {}
+    if evts:
+        trous = ", ".join("?" * len(evts))
+        # la fenêtre glissante ne porte que sur les articles de ces événements-là,
+        # quelques centaines de lignes, et non sur toute la table
+        for r in cx.execute(
+                f"""SELECT evenement_id, id, titre, source, date_pub AS date, lien, nouveau FROM (
+                      SELECT evenement_id, id, titre, source, date_pub, lien, ajout >= ? AS nouveau,
+                             ROW_NUMBER() OVER (PARTITION BY evenement_id
+                                                ORDER BY date_pub DESC) rn
+                      FROM fil WHERE evenement_id IN ({trous})) WHERE rn = 1""",
+                [seuil_nouveau, *[e["id"] for e in evts]]):
+            representants[r["evenement_id"]] = r
+
     sortie = []
     for e in evts:
-        r = cx.execute(
-            """SELECT id, titre, source, date_pub AS date, lien, ajout >= ? AS nouveau
-               FROM fil WHERE evenement_id = ? ORDER BY date_pub DESC LIMIT 1""",
-            (seuil_nouveau, e["id"])).fetchone()
-        if r:
-            sortie.append({**dict(r), "nouveau": bool(r["nouveau"]), "evenement_id": e["id"],
-                           "nb_sources": e["nb_sources"], "lieu": e["lieu"],
-                           "lat": e["lat"], "lon": e["lon"],
-                           "zone": e["zone"], "theme": e["theme"]})
-    # En vue groupée, « nouveaux » doit compter des ÉVÉNEMENTS récents, pas des articles :
-    # afficher « 16 informations · 26 nouvelles » n'a aucun sens pour le lecteur.
-    total_evt, nouveaux_evt = cx.execute(
-        f"""SELECT COUNT(*), COALESCE(SUM(recent), 0) FROM (
-              SELECT EXISTS (SELECT 1 FROM fil f
-                             WHERE f.evenement_id = e.id AND f.ajout >= ?) AS recent
-              FROM evenements e WHERE {ou_evt})""", [seuil_nouveau, *p_evt]).fetchone()
+        r = representants.get(e["id"])
+        if r is None:
+            continue
+        sortie.append({"id": r["id"], "titre": r["titre"], "source": r["source"],
+                       "date": r["date"], "lien": r["lien"], "nouveau": bool(r["nouveau"]),
+                       "evenement_id": e["id"], "nb_sources": e["nb_sources"],
+                       "lieu": e["lieu"], "lat": e["lat"], "lon": e["lon"],
+                       "zone": e["zone"], "theme": e["theme"]})
     return avec_cache({"total": total_evt, "nouveaux": nouveaux_evt,
-                       "total_articles": total, "nouveaux_articles": nouveaux,
+                       "total_articles": total_articles,
                        "decalage": decalage, "groupe": True, "articles": sortie},
                       CACHE_FIL, requete)
 
@@ -331,8 +361,9 @@ def evenements(requete: Request, theme: Optional[str] = None, themes: Optional[s
     # pas gonfler le compteur affiché au lecteur
     where += " AND e.nb_sources > 0"
     lignes = cx.execute(
-        f"""SELECT e.id, e.titre, e.lieu, e.lat, e.lon, e.zone, e.theme,
-                   e.date_debut, e.date_fin, e.nb_sources
+        # zone et date_debut ne servent qu'au panneau de détail : inutile de les répéter
+        # sur 600 points, le poids de la réponse compte plus que l'exhaustivité ici
+        f"""SELECT e.id, e.titre, e.lieu, e.lat, e.lon, e.theme, e.date_fin, e.nb_sources
             FROM evenements e WHERE {where}
             ORDER BY e.nb_sources DESC, e.date_fin DESC LIMIT ?""", [*params, limite]).fetchall()
     points = [dict(r) for r in lignes]

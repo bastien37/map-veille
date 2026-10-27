@@ -1,186 +1,344 @@
 # MAP – Monitoring de l'Actualité Planétaire
 
-Prototype de l'outil de veille du projet pluridisciplinaire (EAE). Une carte du monde en 6 zones et un fil d'actualité, alimentés automatiquement par des flux RSS de médias et par des API ouvertes.
+Outil de veille du projet pluridisciplinaire (EAE). Des flux RSS et des API ouvertes sont
+collectés, triés par thème, **placés sur une carte** et **regroupés par événement** : quand
+cinq médias parlent du même fait, la carte n'affiche qu'un point, et un panneau liste les
+cinq sources.
 
 ## Architecture
 
 ```
-                 ┌──────────── collecte (1 fois par jour) ────────────┐
-Flux RSS + API ──► collecteur/collect.py ──► donnees/map.sqlite
-(table sources)    tri zone + thème                 │
-                   (regles.json, pays.json)         │ lecture seule
-                                                    ▼
-                         navigateur ◄── JSON ── serveur/app.py (API FastAPI)
-                         site/index.html         /api/referentiel, /api/synthese,
-                         (aucune donnée)         /api/articles, /api/collectes
+config/themes.json ─┐
+config/flux.json ───┤
+                    ▼
+Flux RSS + API ──► collecteur/collect.py ──────────► donnees/map.sqlite
+(table sources)    · téléchargement parallèle        articles, événements,
+                     (ETag, disjoncteur)             sources, collectes,
+                   · tri par mots-clés               cache de géocodage
+                   · localisation (collecteur/lieux.py)      │
+                   · regroupement en événements               │ lecture seule
+                                                              ▼
+                              navigateur ◄── JSON ── serveur/app.py (API FastAPI)
+                              site/index.html         /api/referentiel, /api/synthese,
+                              site/carte.js           /api/articles, /api/evenements,
+                              site/vendor/ (Leaflet)  /api/direct (temps réel)
 ```
 
-Le front ne contient **aucune donnée**, ni actualité, ni liste de zones ou de thèmes, ni tracé de la carte. Il demande tout à l'API, qui lit la base SQLite. Les filtres, les comptages et le repère « Nouveau » sont calculés côté serveur.
+Le front ne contient **aucune donnée** : ni actualité, ni liste de thèmes, ni réglage de
+carte. Il demande tout à l'API, qui lit la base SQLite. Les filtres, les comptages et le
+repère « Nouveau » sont calculés côté serveur.
 
-1. **Sources** : la table `sources` de la base liste les sources, chacune avec un type et un interrupteur « active ». Elle se gère depuis l'onglet **Sources** de l'administration.
-2. **Collecte** : le script interroge chaque source. Une source en panne ne bloque pas les autres, et son erreur est notée dans le journal de la base.
-3. **Tri** : chaque article reçoit une zone et un thème.
-   - Si l'API donne le pays (GDACS, ReliefWeb), la zone vient de `pays.json` et elle est exacte.
-   - Sinon, la zone et le thème viennent des mots-clés de `regles.json`. Un mot dans le titre vaut 3 points, dans le résumé 1 point.
-4. **Stockage** : la base `donnees/map.sqlite` ne garde que le titre, la source, la date, la zone, le thème et le lien (C03). Les doublons sont écartés, qu'ils aient le même lien ou le même titre (D03).
-   **À chaque collecte, les articles publiés il y a plus de 30 jours sont supprimés définitivement (D05)**, y compris ceux classés à la main ou masqués. Un article déjà vieux de plus de 30 jours n'est pas enregistré. Le nombre d'articles supprimés est noté dans le journal des collectes.
-5. **Diffusion** : l'API sert le fil des 30 derniers jours. Un article sans zone ou sans thème reste dans la base, mais elle ne le diffuse pas (D04).
+### La chaîne, étape par étape
+
+1. **Sources** — décrites dans `config/flux.json`, appliquées à la table `sources`.
+2. **Collecte** — les sources sont interrogées **en parallèle**, une seule à la fois par
+   domaine. Un flux inchangé répond `304` et n'est pas retéléchargé ; une source en panne
+   répétée est mise de côté quelque temps (disjoncteur) ; une source interrogée il y a moins
+   que sa fréquence est laissée tranquille.
+3. **Tri** — zone et thème par mots-clés, en un seul balayage du texte.
+4. **Localisation** — balises géographiques du flux, sinon un nom de lieu reconnu dans le
+   titre, sinon rien (voir « Comment un article arrive sur la carte »).
+5. **Regroupement** — même lieu, même fenêtre de temps, titres proches : un seul événement.
+6. **Stockage** — `donnees/map.sqlite`. Seuls le titre, la source, la date, le lien et la
+   position sont conservés (C03). **Les articles de plus de 30 jours sont supprimés à chaque
+   collecte (D05)**, et les événements qui n'ont plus de source avec eux.
+7. **Diffusion** — l'API sert le fil et les points de la carte. Un article sans zone ou sans
+   thème reste en base mais n'est pas diffusé (D04).
+
+## Démarrer
+
+```bash
+uv sync                                   # installe Python 3.12 et les bibliothèques
+uv run collecteur/collect.py              # 1. remplit la base
+uv run uvicorn serveur.app:app --reload   # 2. démarre le serveur
+```
+
+Puis http://localhost:8000. Documentation interactive de l'API : http://localhost:8000/docs.
+
+La page ne fonctionne pas en double-cliquant sur `site/index.html` : sans serveur, elle n'a
+aucune donnée et le dit.
+
+Essais sans connexion :
+
+```bash
+uv run pytest                                                  # 317 tests, ~17 s
+uv run collecteur/collect.py --hors-ligne --base test.sqlite   # réponses enregistrées de tests/
+```
+
+Pour développer avec un serveur de flux local, lever la protection SSRF qui refuse les
+adresses internes :
+
+```bash
+MAP_AUTORISER_RESEAU_LOCAL=1 uv run collecteur/collect.py
+```
+
+## Configurer
+
+Tout ce qui se règle sans toucher au code est dans `config/`. Chaque fichier porte en tête
+un commentaire qui explique ses champs.
+
+| Fichier | Ce qu'il décrit |
+|---|---|
+| `config/themes.json` | Les thèmes : code, nom, ordre d'affichage, interrupteur, mots-clés de tri |
+| `config/flux.json` | Les sources : nom, type, adresse, thème imposé, langue, fréquence de rafraîchissement |
+| `config/carte.json` | Le fond de carte : serveur de tuiles, attribution, vue initiale, nombre de points |
+| `config/geocodage.json` | Le service de géocodage extérieur — **désactivé par défaut** |
+| `config/exonymes.json` | Les noms français des lieux (Londres, Pékin, Le Caire…) |
+| `config/lieux_ignores.json` | Les noms de lieux à ne pas reconnaître, parce qu'ils sont aussi des mots courants |
+
+### Ajouter ou retirer un thème
+
+Ajouter une entrée dans `config/themes.json` suffit : la base se met à jour à la prochaine
+ouverture, l'API et le site suivent, sans toucher au code.
+
+```json
+{ "code": "spo", "nom": "Sport", "actif": true, "ordre": 60,
+  "mots_cles": ["jeux olympiques", "coupe du monde", "football", "championnat*"] }
+```
+
+Les mots-clés s'écrivent **en minuscules, sans accents**. Une étoile finale accepte n'importe
+quelle suite de lettres : `armee*` reconnaît *armées* et *armement*.
+
+Mettre `"actif": false` retire le thème du site **sans rien supprimer** : les articles déjà
+classés dedans restent en base, et réactiver le thème les fait réapparaître. Ne jamais
+réutiliser un code pour autre chose.
+
+### Ajouter une source
+
+Deux chemins, qui ne se marchent pas dessus :
+
+- **`config/flux.json`** est le catalogue : c'est là qu'on décrit les flux.
+- **L'administration** décide lesquels tournent.
+
+Concrètement : les champs du catalogue (type, adresse, thème imposé, langue, fréquence) sont
+repris du fichier à chaque collecte ; l'interrupteur « actif » n'est posé qu'à la création,
+donc couper une source depuis l'administration tient. Si on modifie l'adresse, la langue ou
+la fréquence **depuis l'administration**, la source passe « à la main » : le fichier cesse de
+s'y appliquer, et l'administration l'indique. Une source retirée du fichier est désactivée,
+jamais supprimée ; ses articles restent.
+
+```json
+{ "nom": "Le Monde", "type": "rss",
+  "url": "https://www.lemonde.fr/international/rss_full.xml",
+  "theme": null, "langue": "fr", "frequence_minutes": 60, "actif": true }
+```
+
+`theme` impose un thème à tous les articles de la source (`null` = tri par mots-clés).
+`frequence_minutes` est le délai minimal entre deux interrogations : on peut ainsi lancer la
+collecte toutes les dix minutes sans redemander un quotidien à chaque fois.
+
+Vérifier ce que la configuration a produit :
+
+```bash
+uv run collecteur/admin.py config
+```
+
+**Un nouveau type d'API** demande du code : écrire `source_xxx(s, hors_ligne, …)` dans
+`collect.py`, l'appeler depuis `collecter_source()`, et ajouter le type dans `TYPES_SOURCES`
+et dans la contrainte `CHECK` de la table `sources` (`base.py`). Le tri, la localisation, le
+regroupement et le stockage sont communs.
+
+## Comment un article arrive sur la carte
+
+Trois chances, de la plus sûre à la plus faillible. La règle est la même partout :
+**mieux vaut un article sans point qu'un point faux.** Un article mal placé raconte une
+histoire fausse ; un article absent de la carte reste lisible dans la liste.
+
+1. **Les balises du flux** — `georss:point`, `geo:lat` / `geo:long`, `georss:where`, et la
+   géométrie des alertes GDACS. Exactes, fournies par le média.
+2. **Un nom de lieu reconnu dans le titre ou le résumé**, cherché dans
+   `donnees/gazetteer.json.gz` : 12 629 pays et villes, 322 Kio, hors ligne, sans limite de
+   débit. Un nom n'est retenu que s'il porte une majuscule dans le texte d'origine, fait au
+   moins quatre lettres et n'est pas dans `config/lieux_ignores.json`. Le nom le plus long
+   consomme ses mots (« New Delhi » ne fait pas gagner « Delhi ») et les homonymes se
+   départagent par la population, puis par le pays cité dans le même texte.
+3. **Un service de géocodage extérieur**, désactivé par défaut, et seulement pour un nom
+   qu'une *source* annonce comme étant un lieu — jamais pour deviner un lieu dans une phrase.
+
+Mesuré sur `tests/lieux_annotes.json` (52 cas annotés à la main, dont 14 qui ne doivent
+**pas** être placés) : 100 % de precision, 100 % de rappel. Sur 4 000 articles du banc de
+flux, 81 % sont placés.
+
+La **zone** se déduit du pays du lieu quand les mots-clés n'en donnent pas : sans cela, un
+quart des points seraient perdus faute de zone (D04).
+
+### Refaire la base de lieux
+
+`donnees/gazetteer.json.gz` est versionné : l'installation et la collecte n'ont besoin ni de
+réseau, ni de bibliothèque supplémentaire. Pour le reconstruire après avoir enrichi
+`config/exonymes.json` :
+
+```bash
+uv run --with geonamescache outils/construire_gazetteer.py
+```
+
+Les « alternatenames » de GeoNames ne sont **pas** reprises : toutes langues mélangées et sans
+étiquette, elles donnent *Landan* ou *Ljondan* pour London. Les noms français sont relus à la
+main dans `config/exonymes.json`.
+
+### Activer un géocodeur extérieur
+
+Dans `config/geocodage.json`, mettre `"actif": true` et renseigner un `user_agent` avec une
+**vraie adresse de contact** — Nominatim et Photon l'exigent, et une adresse bidon fait
+bloquer le projet entier. Le programme refuse de démarrer avec l'adresse d'exemple.
+
+Tout nom cherché est mémorisé dans la table `lieux_geocodes`, succès **comme échec** : un même
+nom n'est jamais demandé deux fois. Sur un serveur dédié, auto-héberger Photon lève la limite
+de débit.
+
+## Comment deux articles n'en font qu'un
+
+Trois conditions, **toutes nécessaires** : moins de 50 km, moins de 48 h d'écart, et des
+titres qui se ressemblent assez. Le seuil de ressemblance dépend de ce que le lieu dit déjà :
+28 % de mots communs si les deux articles sont au même endroit, 45 % sinon.
+
+Les seuils sont réglés et surveillés sur `tests/regroupement_annote.json`, des paires de
+manchettes annotées à la main. Ils penchent volontairement du côté de la séparation :
+réunir deux faits distincts est pire que les laisser côte à côte, car le lecteur ne voit
+alors plus qu'un point là où il se passe deux choses.
+
+> **Changement par rapport à la version précédente.** Un deuxième article portant le même
+> titre était auparavant *jeté* — sa source était perdue. Il est désormais conservé et
+> rattaché au même événement. Le fil rend une ligne par événement, avec `nb_sources` ;
+> `grouper=false` retrouve la liste article par article.
 
 ## La base de données
 
-`donnees/map.sqlite` est créée automatiquement au premier lancement. Le schéma est décrit dans `collecteur/base.py`.
+`donnees/map.sqlite` est créée au premier lancement et migrée automatiquement. Le schéma est
+dans `collecteur/base.py` (version 9).
 
 | Table ou vue | Contenu |
 |---|---|
-| `articles` | Tous les articles collectés : lien (unique), titre, source, date de publication, zone, thème, date d'ajout, correction manuelle, masquage |
-| `zones`, `themes` | Les 6 zones et les 5 thèmes. Les clés étrangères empêchent un code inconnu. |
-| `collectes` | Journal des passages du collecteur : date, éléments lus, nouveaux articles, doublons, articles supprimés |
-| `sources` | Les sources à interroger : nom, type (RSS, GDACS, ReliefWeb), adresse, active ou non, paramètres, notes. Remplie au départ avec les 7 sources d'origine. |
-| `collectes_sources` | Pour chaque passage, le résultat de chaque source (ok ou erreur, avec le message) |
-| `fil` (vue) | Les articles publiables, c'est-à-dire avec une zone et un thème, et non masqués |
+| `articles` | Titre, source, date, lien, zone, thème, **position**, événement, correction manuelle, masquage |
+| `evenements` | Un fait = une ligne : titre, lieu, position, période, nombre de sources publiables |
+| `themes`, `zones` | Référentiels. `themes` vient de `config/themes.json` |
+| `sources` | Les sources : état du cache conditionnel, disjoncteur, langue, fréquence, origine |
+| `lieux_geocodes` | Cache de géocodage, succès et échecs |
+| `collectes`, `collectes_sources` | Journal de chaque passage, source par source |
+| `fil` (vue) | Les articles publiables : zone **et** thème connus, non masqués |
 | `a_trier` (vue) | Les articles que le tri n'a pas su classer |
 
-On peut ouvrir la base avec [DB Browser for SQLite](https://sqlitebrowser.org/) ou n'importe quel outil SQL, par exemple pour compter les articles par zone et par semaine.
-
-Outil d'administration en ligne de commande :
+Outil en ligne de commande :
 
 ```bash
-uv run collecteur/admin.py stats                # chiffres par zone et thème, dernières collectes et sources en erreur
-uv run collecteur/admin.py a-trier              # articles non classés, avec leur numéro
-uv run collecteur/admin.py classer 42 asi def   # classe l'article 42 en Asie / Conflits et défense
-uv run collecteur/admin.py chercher "Taïwan"    # recherche dans les titres
+uv run collecteur/admin.py stats      # chiffres par zone et thème, dernières collectes
+uv run collecteur/admin.py config     # thèmes et sources tels que la configuration les a posés
+uv run collecteur/admin.py a-trier    # articles non classés, avec leur numéro
+uv run collecteur/admin.py classer 42 asi def
+uv run collecteur/admin.py chercher "Taïwan"
 ```
 
-Un article classé à la main n'est plus jamais modifié par le collecteur, et il apparaît tout de suite sur le site.
+Un article classé à la main n'est plus jamais modifié par le collecteur.
 
-
-## Les sources branchées
-
-| Type | Source | Clé | Ce qu'elle apporte |
-|---|---|---|---|
-| `rss` | Le Monde, France 24, RFI, franceinfo | aucune | Actualité internationale des grands médias français |
-| `gdacs` | [GDACS](https://www.gdacs.org/) (ONU / Commission européenne) | aucune | Alertes orange et rouges : séismes, cyclones, inondations, volcans, sécheresses, feux, tsunamis. Pays fourni par l'API. |
-| `reliefweb` | [ReliefWeb](https://apidoc.reliefweb.int/) (OCHA, ONU) | **appname** | Rapports humanitaires en français, pays fourni par l'API. Désactivé tant que l'appname n'est pas obtenu. |
-
-**ReliefWeb** demande un `appname` approuvé pour chaque requête. Pour l'activer :
-1. Demander un appname via le formulaire indiqué sur https://apidoc.reliefweb.int/parameters (par exemple `eae-map-veille`, avec une adresse de contact).
-2. Définir la variable d'environnement `RELIEFWEB_APPNAME` sur la machine qui lance la collecte : `$env:RELIEFWEB_APPNAME="..."` (PowerShell) ou `export RELIEFWEB_APPNAME=...`.
-3. Dans l'administration, onglet **Sources**, activer la source ReliefWeb.
-
-**GDACS** demande de citer la source sous la forme « Global Disaster Alert and Coordination System, GDACS ». C'est fait automatiquement, car c'est le nom de la source affiché sous chaque alerte.
-
-## Interface d'administration
-
-Une console web, réservée à l'équipe, est disponible sur **http://localhost:8000/admin**. Elle a cinq onglets :
-
-- **Tableau de bord** : chiffres clés, articles visibles par zone et par thème, activité de chaque source.
-- **À trier** : les articles que le tri automatique n'a pas su classer. On choisit leur zone et leur thème puis on clique sur « Classer » : l'article apparaît aussitôt sur le site. « Masquer » écarte un article hors sujet (actualité française, culture…).
-- **Articles** : recherche dans les titres, filtres par statut, zone et thème. On peut reclasser n'importe quel article, le masquer ou le réafficher. Un article masqué reste dans la base mais disparaît du site.
-- **Sources** : la liste des sources, avec pour chacune son dernier passage (ok ou erreur) et son nombre d'articles. On peut en ajouter, les modifier, les activer ou les désactiver d'un clic, et les supprimer (leurs articles déjà collectés restent). Le bouton « Tester sans enregistrer » interroge une source et montre un aperçu des articles et de leur classement, sans rien écrire dans la base : pratique pour vérifier l'adresse d'un nouveau flux RSS.
-- **Collectes** : bouton « Lancer la collecte » et journal des passages, avec l'état et le message d'erreur de chaque source.
-
-L'accès est protégé par un mot de passe. L'identifiant est `admin`, et le mot de passe est celui de la variable d'environnement `MAP_ADMIN_MOT_DE_PASSE`. Sans cette variable, l'administration est désactivée.
-
-```powershell
-# PowerShell, dans le dossier map-veille
-$env:MAP_ADMIN_MOT_DE_PASSE = "un-mot-de-passe-long"
-uv run uvicorn serveur.app:app --reload
-```
-```bash
-# Linux ou Git Bash
-MAP_ADMIN_MOT_DE_PASSE="un-mot-de-passe-long" uv run uvicorn serveur.app:app --reload
-```
-
-Le mot de passe n'est jamais écrit dans le code ni dans Git. En production, le site doit être servi en **HTTPS**, sinon le mot de passe circule en clair sur le réseau.
-
-Les mêmes actions existent en ligne de commande avec `collecteur/admin.py` (voir plus haut).
-
-## Installation avec uv
-
-Les bibliothèques du projet sont gérées par [uv](https://docs.astral.sh/uv/). `pyproject.toml` les déclare et `uv.lock` fige leurs versions exactes, pour que tout le monde ait le même environnement.
-
-1. Installer uv (une seule fois par poste), sous Windows (PowerShell) :
-   ```powershell
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-   ```
-   Sous Linux ou macOS : `curl -LsSf https://astral.sh/uv/install.sh | sh`
-2. Dans le dossier `map-veille`, installer Python et les bibliothèques :
-   ```bash
-   uv sync
-   ```
-   uv télécharge Python 3.12 (version fixée par `.python-version`) s'il n'est pas déjà présent, puis crée l'environnement `.venv/`.
-
-Bibliothèques utilisées :
-
-| Bibliothèque | Rôle |
-|---|---|
-| `feedparser` | Lecture des flux RSS et Atom, y compris quand ils sont mal formés |
-| `fastapi` | API web qui sert les données au front |
-| `uvicorn` | Serveur web qui fait tourner l'API |
-| `pytest`, `httpx2` (développement) | Tests automatiques du collecteur et de l'API |
-
-Pour ajouter une bibliothèque : `uv add nom` (ou `uv add --dev nom` pour un outil de développement). Il faut ensuite valider `pyproject.toml` et `uv.lock` dans Git.
-
-## Lancer en local
-
-Deux commandes, dans deux terminaux ouverts dans le dossier `map-veille` :
-
-```bash
-uv run collecteur/collect.py                     # 1. remplit la base (à relancer pour mettre à jour)
-uv run uvicorn serveur.app:app --reload          # 2. démarre le serveur
-```
-
-Ouvrir ensuite http://localhost:8000. La documentation interactive de l'API est sur http://localhost:8000/docs : on peut y essayer chaque requête.
-
-La page ne fonctionne plus en double-cliquant sur `site/index.html` : sans serveur, elle n'a aucune donnée à afficher et elle l'indique.
-
-Tests, sans connexion :
-
-```bash
-uv run pytest
-uv run collecteur/collect.py --hors-ligne --base test.sqlite   # essai sur les réponses enregistrées de tests/
-```
-
-### Les routes de l'API
+## Les routes de l'API
 
 | Route | Paramètres | Réponse |
 |---|---|---|
-| `GET /api/referentiel` | – | Zones (nom, libellé court, tracé SVG, position de l'étiquette), thèmes, durée du repère « Nouveau » |
-| `GET /api/synthese` | `theme`, `jours` (30) | Nombre d'articles et de nouveautés par zone, date de la dernière collecte, liste des sources |
-| `GET /api/articles` | `zone`, `theme`, `jours` (30), `limite` (150), `decalage` (0) | Articles du plus récent au plus ancien, avec le total pour la pagination |
-| `GET /api/collectes` | `limite` (5) | Journal des collectes et état de chaque source |
+| `GET /api/referentiel` | – | Zones, thèmes actifs, réglages de la carte, durée du repère « Nouveau » |
+| `GET /api/synthese` | `theme`, `themes`, `jours` | Comptages par zone, date de la dernière collecte, sources |
+| `GET /api/articles` | `zone`, `theme`, `themes`, `jours`, `limite`, `decalage`, `grouper` | Le fil, une ligne par événement par défaut |
+| `GET /api/evenements` | `theme`, `themes`, `zone`, `jours`, `bbox`, `limite` | Les points de la carte, les plus suivis d'abord |
+| `GET /api/evenements/{id}` | – | Un événement et **toutes ses sources** |
+| `GET /api/direct` | – | Flux Server-Sent Events : signale qu'une collecte a eu lieu |
+| `GET /api/collectes` | `limite` | Journal des collectes et état de chaque source |
 
-Un code de zone ou de thème inconnu renvoie une erreur 422. Si la base n'existe pas encore, l'API répond 503.
+`themes` accepte une liste séparée par des virgules. `bbox` s'écrit `ouest,sud,est,nord` en
+degrés et accepte le passage de l'antiméridien. Un code inconnu renvoie 422 ; si la base
+n'existe pas encore, 503.
+
+Les réponses sont compressées (gzip) et portent `Cache-Control` et `ETag` : le référentiel est
+gardé une heure, le fil une minute, et un navigateur à jour reçoit `304`.
+
+## Le site
+
+Deux vues — **Carte** et **Liste seule** — un filtre de période, et des thèmes que le visiteur
+coche à sa guise (son choix est retenu localement). Chaque thème a sa page : `/theme/eco`,
+adresse partageable, sans rechargement.
+
+Leaflet et Leaflet.markercluster sont **servis par le site** (`site/vendor/`, licences
+comprises) : aucune requête vers un CDN. Le module de carte et ces bibliothèques ne sont
+téléchargés qu'à la première ouverture de la carte — un visiteur qui reste sur la liste ne
+paie pas ces 60 Kio. Les points ne sont demandés que pour la fenêtre affichée.
+
+Le fond de carte vient par défaut d'OpenStreetMap, dont la politique d'usage demande de citer
+la source — c'est fait en permanence sur la carte — et de rester sur un trafic modeste. Pour
+un site qui marche, installer son propre serveur de tuiles et changer l'adresse dans
+`config/carte.json`.
+
+**Accessibilité** : contrastes conformes WCAG AA en thème clair comme sombre (le plus faible
+mesuré est 4,69 : 1), navigation complète au clavier avec focus visible, zones `aria-live`
+pour l'état de la carte, cibles tactiles d'au moins 24 px, et la vue « Liste seule » donne
+exactement les mêmes données sans carte. Vérifié par `bancs/bench_accessibilite.mjs`.
+
+**Mises à jour sans recharger** : le serveur signale la fin d'une collecte, le navigateur
+redemande ce qu'il affiche avec ses propres filtres. Si le flux d'événements ne passe pas
+(proxy qui coupe), le site se replie tout seul sur une interrogation toutes les deux minutes,
+suspendue quand l'onglet est caché.
+
+## Administration
+
+Console web réservée à l'équipe sur **/admin**, protégée par mot de passe.
+
+```bash
+MAP_ADMIN_MOT_DE_PASSE="un-mot-de-passe-long" uv run uvicorn serveur.app:app --reload
+```
+
+```powershell
+$env:MAP_ADMIN_MOT_DE_PASSE = "un-mot-de-passe-long"   # PowerShell
+uv run uvicorn serveur.app:app --reload
+```
+
+Le mot de passe n'est jamais écrit dans le code ni dans Git. **En production, servir le site
+en HTTPS** : en HTTP simple, le mot de passe circule en clair.
+
+Cinq onglets : tableau de bord, articles à trier, recherche et reclassement, sources (avec
+leur dernier passage, leur disjoncteur et un bouton « Tester sans enregistrer »), et journal
+des collectes avec un bouton « Lancer la collecte » — qui force le passage sans attendre la
+fréquence ni la fin d'une mise en pause.
+
+## Sécurité
+
+| Risque | Ce qui est fait |
+|---|---|
+| **SSRF** — une adresse de flux qui vise le réseau interne | Schéma et adresse IP écrite en clair vérifiés à l'enregistrement ; adresses réellement résolues vérifiées **juste avant chaque requête**, et de nouveau après chaque redirection. `MAP_AUTORISER_RESEAU_LOCAL=1` lève la protection pour le développement. |
+| **Mémoire** — un flux énorme ou sans fin | Lecture bornée à 8 Mio, au-delà la source est abandonnée |
+| **XSS** — du HTML dans un flux | Les balises sont retirées à la collecte, et tout ce qui vient d'un flux repasse par un échappement à l'affichage |
+| **Liens piégés** | Seuls les liens `http(s)` entrent en base ; les liens externes portent `rel="noopener noreferrer"` |
+| **Mot de passe d'administration** | Variable d'environnement, comparaison à temps constant, HTTPS requis en production |
+
+Le contrôle DNS est fait au moment de la requête et non à l'enregistrement : une panne de
+résolution ne doit pas empêcher d'ouvrir la base ni de sauvegarder une source valable.
 
 ## Mise en ligne
 
-Le site a maintenant besoin d'un **serveur qui exécute Python** : GitHub Pages, qui ne sert que des fichiers statiques, ne convient plus. Il faut :
+Il faut un serveur qui exécute Python (GitHub Pages ne convient pas) :
 
-1. **Le serveur web**, lancé en permanence, avec la variable `MAP_ADMIN_MOT_DE_PASSE` définie pour activer l'administration :
+1. **Le serveur web**, en permanence, avec `MAP_ADMIN_MOT_DE_PASSE` :
    ```bash
    uv run uvicorn serveur.app:app --host 0.0.0.0 --port 8000
    ```
-   En production, on le place derrière un serveur HTTPS (nginx, Apache ou IIS) et on le déclare comme service pour qu'il redémarre seul (systemd sous Linux, NSSM sous Windows).
-2. **La collecte quotidienne** (D07), sur la même machine, puisque la base est un fichier local :
-   - Linux (cron), chaque jour à 6 h 15 :
-     ```
-     15 6 * * * cd /chemin/map-veille && /chemin/uv run collecteur/collect.py >> collecte.log 2>&1
-     ```
-   - Windows (tâche planifiée), à lancer une fois dans PowerShell :
-     ```powershell
-     schtasks /Create /TN "MAP collecte" /SC DAILY /ST 06:15 /TR "cmd /c cd /d C:\chemin\map-veille && uv run collecteur/collect.py >> collecte.log 2>&1"
-     ```
-   Le serveur lit la base en lecture seule, et SQLite (mode WAL) autorise cette lecture pendant que la collecte écrit. Il n'y a rien à redémarrer après une collecte.
+   Derrière nginx, Apache ou Caddy en HTTPS, déclaré comme service (systemd) pour qu'il
+   redémarre seul. Avec nginx, laisser passer `/api/direct` sans tampon
+   (`proxy_buffering off;`) — l'en-tête `X-Accel-Buffering: no` s'en charge déjà.
+   Activer brotli au niveau du serveur frontal si l'on veut aller plus loin que gzip.
+2. **La collecte planifiée** (D07), sur la même machine puisque la base est un fichier local.
+   Avec les fréquences par source, une collecte toutes les dix minutes est raisonnable :
+   ```
+   */10 * * * * cd /chemin/map-veille && /chemin/uv run collecteur/collect.py >> collecte.log 2>&1
+   ```
+   Le serveur lit la base en lecture seule et SQLite (mode WAL) autorise cette lecture pendant
+   l'écriture : rien à redémarrer après une collecte.
 3. **Le lien Moodle** (C02) pointe vers l'adresse du serveur.
 
 ### Exemple : Alwaysdata
 
-Sur Alwaysdata, on n'installe pas uv (66 Mo, trop pour l'offre gratuite). On utilise `pip` avec `requirements.txt`, généré depuis `uv.lock`. Remplacer `NOM` par le nom du compte Alwaysdata.
+Sur Alwaysdata, on n'installe pas uv (66 Mo, trop pour l'offre gratuite) : on utilise `pip`
+avec `requirements.txt`, généré depuis `uv.lock`. Remplacer `NOM` par le nom du compte.
 
-1. **Environnement > Python** : choisir la version 3.12.
-2. **En SSH** (`ssh NOM@ssh-NOM.alwaysdata.net`), récupérer le code et installer :
+1. **Environnement > Python** : version 3.12.
+2. **En SSH** (`ssh NOM@ssh-NOM.alwaysdata.net`) :
    ```bash
-   git clone git@github.com:bastien37/map-veille.git ~/map-veille   # clé de déploiement GitHub, voir ci-dessous
+   git clone git@github.com:wakadu13/map-veille.git ~/map-veille
    cd ~/map-veille
    python -m venv .venv
    .venv/bin/python -m pip install -r requirements.txt
@@ -190,42 +348,67 @@ Sur Alwaysdata, on n'installe pas uv (66 Mo, trop pour l'offre gratuite). On uti
    - commande : `/home/NOM/map-veille/.venv/bin/uvicorn serveur.app:app --host $IP --port $PORT`
    - répertoire de travail : `/home/NOM/map-veille`
    - variable d'environnement : `MAP_ADMIN_MOT_DE_PASSE=...`
-4. **Avancé > Tâches planifiées**, une commande chaque jour (`15 6 * * *`) :
-   `cd /home/NOM/map-veille && .venv/bin/python collecteur/collect.py`
-5. **Mise à jour** du code :
-   ```bash
-   cd ~/map-veille && git pull && .venv/bin/python -m pip install -r requirements.txt
-   ```
-   puis redémarrer le site dans **Web > Sites**.
+4. **Avancé > Tâches planifiées** : `cd /home/NOM/map-veille && .venv/bin/python collecteur/collect.py`
+5. **Mise à jour** : `git pull && .venv/bin/python -m pip install -r requirements.txt`, puis
+   redémarrer le site.
 
-Pour un dépôt privé, on donne au serveur une **clé de déploiement** en lecture seule. On la crée en SSH (`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""`), puis on colle `~/.ssh/id_ed25519.pub` dans GitHub, *Settings > Deploy keys*.
+Pour un dépôt privé, donner au serveur une **clé de déploiement** en lecture seule
+(`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""`, puis coller la clé publique dans GitHub,
+*Settings > Deploy keys*).
 
-Après chaque `uv add`, il faut régénérer `requirements.txt` :
-`uv export --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt`, puis remettre les trois lignes de commentaire en tête du fichier.
+Après chaque `uv add`, régénérer `requirements.txt` :
+`uv export --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt`,
+puis remettre les lignes de commentaire en tête.
 
-Options possibles : un serveur de l'École (le plus adapté au contexte, à voir avec le service informatique), ou un hébergeur Python comme PythonAnywhere, Render ou Alwaysdata. Ce dernier est français et propose une offre gratuite limitée. Dans tous les cas, l'hébergeur doit autoriser une tâche planifiée et l'accès sortant aux sites des sources.
+## Mesures
 
-Le workflow GitHub `.github/workflows/tests.yml` ne publie plus le site : il lance seulement les tests à chaque modification du code.
+Le dossier `bancs/` contient des bancs de mesure reproductibles, et les rapports :
 
-## Ajouter une source
+- `bancs/RAPPORT-phase1.md` — audit de départ, goulots trouvés par profilage ;
+- `bancs/DECISION-phase2.md` — comparaison Python / Go / Rust et choix du stockage ;
+- `bancs/RESULTATS-phase4.md` — tableau avant / après.
 
-- **Un flux RSS, ou une source GDACS ou ReliefWeb avec d'autres réglages** : dans l'administration, onglet **Sources**, « Ajouter une source ». Testez-la avant de l'enregistrer.
-- **Un nouveau type d'API** : il faut du code.
-  1. Écrire une fonction `source_xxx(s, hors_ligne, ...)` dans `collect.py`. Elle renvoie une liste construite avec `article(titre, lien, date, source, resume, zone=, theme=)`.
-  2. L'appeler dans `collecter_source()`.
-  3. Ajouter le type dans `TYPES_SOURCES` et dans la contrainte `CHECK` de la table `sources` (`base.py`).
+```bash
+uv run bancs/serveur_flux.py --port 8910 --flux 100   # serveur de flux, dans un terminal à part
+uv run bancs/bench_ingestion.py --flux 100 --port 8911
+uv run bancs/gen_base.py && uv run bancs/bench_api.py
+uv run bancs/bench_lieux.py                           # precision de la localisation
+node bancs/bench_accessibilite.mjs http://127.0.0.1:8000/
+```
 
-  Le tri, les doublons et le stockage sont gérés en commun.
+### Pourquoi Python, et quand rouvrir la question
+
+Le choix de rester en Python plutôt que de passer à Go repose sur des mesures, pas sur une
+préférence : à l'échelle visée l'écart est de 3 s par collecte, et `encoding/xml` rejette les
+flux mal formés que `feedparser` répare. Le dossier complet est dans
+`bancs/DECISION-phase2.md`.
+
+**Seuils à partir desquels re-mesurer** avec `bancs/` :
+
+| Signal | Seuil indicatif |
+|---|---|
+| Nombre de flux | au-delà de ~500 |
+| Fréquence de collecte | toutes les 5 minutes ou moins |
+| Durée d'une collecte | plus de 30 s de façon répétée |
+| Articles en base | au-delà de 500 000 (re-mesurer aussi SQLite contre PostgreSQL/PostGIS) |
+| p95 de l'API | plus de 100 ms |
 
 ## Codes
 
-Codes des zones : `eur` Europe, `rus` Russie et Europe de l'Est, `mena` Moyen-Orient et Afrique du Nord, `afr` Afrique subsaharienne, `asi` Asie et Indo-Pacifique, `ame` Amériques.
+Zones : `eur` Europe, `rus` Russie et Europe de l'Est, `mena` Moyen-Orient et Afrique du Nord,
+`afr` Afrique subsaharienne, `asi` Asie et Indo-Pacifique, `ame` Amériques.
 
-Codes des thèmes : `def` Conflits et défense, `dip` Diplomatie et RI, `eco` Économie et énergie, `tec` Sciences, technologies et espace, `cli` Climat et catastrophes naturelles.
+Les thèmes ne sont plus codés en dur : voir `config/themes.json`.
 
 ## Points à valider (lot LT3)
 
 - Les adresses des flux et les conditions d'utilisation de chaque source (C03, C04).
-- Les listes de mots-clés : les enrichir à partir de `admin.py a-trier` après quelques jours de collecte.
-- Les cas limites de zones : la Turquie et le Soudan sont classés en Moyen-Orient et Afrique du Nord, le Groenland en Europe.
-- Le thème par défaut des rapports ReliefWeb (`theme_defaut`, actuellement Diplomatie et RI).
+- Les mots-clés : les enrichir à partir de `admin.py a-trier` après quelques jours.
+- Les cas limites de zones : la Turquie et le Soudan sont en Moyen-Orient et Afrique du Nord,
+  le Groenland en Europe.
+- Les exonymes français (`config/exonymes.json`) et les noms à ignorer
+  (`config/lieux_ignores.json`), à enrichir dès qu'un cas réel est mal traité.
+- Le fond de carte : rester sur les tuiles OpenStreetMap ou installer son propre serveur.
+- D04 : faut-il encore exiger une zone **et** un thème pour diffuser, maintenant que la zone
+  n'apparaît plus sur le site ? Elle est aujourd'hui déduite du lieu, donc la question ne
+  coûte plus de points sur la carte, mais elle reste ouverte.

@@ -28,9 +28,11 @@ import argparse
 import collections
 import gzip
 import html
+import ipaddress
 import json
 import os
 import re
+import socket
 import sys
 import threading
 import time
@@ -171,6 +173,85 @@ class NonModifie(Exception):
     """Le serveur a répondu 304 : le flux n'a pas changé depuis la dernière collecte."""
 
 
+class AdresseRefusee(ValueError):
+    """L'adresse demandée vise le réseau interne : le collecteur ne doit pas y aller."""
+
+
+# Les adresses de flux viennent de l'administration et d'un fichier de configuration : ce
+# sont des entrées, pas des constantes. Sans contrôle, « http://169.254.169.254/… » ou
+# « http://127.0.0.1:8000/api/admin/… » ferait du collecteur un relais vers le réseau
+# interne du serveur (SSRF). On vérifie le schéma, puis les adresses IP réellement
+# résolues — et de nouveau après chaque redirection, qu'un serveur distant contrôle.
+AUTORISER_RESEAU_LOCAL = os.environ.get("MAP_AUTORISER_RESEAU_LOCAL") == "1"
+
+
+def adresses_de(hote: str) -> set:
+    infos = socket.getaddrinfo(hote, None, proto=socket.IPPROTO_TCP)
+    return {ipaddress.ip_address(i[4][0]) for i in infos}
+
+
+def verifier_forme_url(url: str, autoriser_local: bool = None):
+    """Contrôle d'écriture, SANS résolution DNS : schéma, nom de machine, et adresse IP
+    écrite en clair si c'en est une.
+
+    C'est ce contrôle-là qu'on applique en enregistrant une source. Interroger le DNS à ce
+    moment serait une mauvaise idée : une panne de résolution empêcherait d'ouvrir la base
+    ou de sauvegarder une source parfaitement valable.
+    """
+    if autoriser_local is None:
+        autoriser_local = AUTORISER_RESEAU_LOCAL
+    p = urllib.parse.urlparse(url or "")
+    if p.scheme not in ("http", "https"):
+        raise AdresseRefusee(f"adresse refusée : schéma « {p.scheme or '?'} » "
+                             "(seuls http:// et https:// sont acceptés)")
+    if not p.hostname:
+        raise AdresseRefusee("adresse refusée : nom de machine absent")
+    if autoriser_local:
+        return
+    if p.hostname.lower() in ("localhost", "localhost.localdomain"):
+        raise AdresseRefusee("adresse refusée : localhost désigne le serveur lui-même")
+    try:
+        ip = ipaddress.ip_address(p.hostname.strip("[]"))
+    except ValueError:
+        return          # c'est un nom : le DNS sera vérifié au moment de la requête
+    if not ip.is_global or ip.is_multicast:
+        raise AdresseRefusee(f"adresse refusée : {ip} est sur le réseau interne. "
+                             "Un flux doit être servi par une machine publique.")
+
+
+def verifier_url(url: str, autoriser_local: bool = None):
+    """Contrôle complet, appliqué juste avant d'ouvrir la connexion : la forme, puis les
+    adresses IP réellement résolues. C'est ici que la vérification compte, car un nom peut
+    changer de cible entre l'enregistrement de la source et la collecte."""
+    if autoriser_local is None:
+        autoriser_local = AUTORISER_RESEAU_LOCAL
+    verifier_forme_url(url, autoriser_local)
+    if autoriser_local:
+        return
+    hote = urllib.parse.urlparse(url).hostname
+    try:
+        adresses = adresses_de(hote)
+    except socket.gaierror as e:
+        raise AdresseRefusee(f"nom de machine introuvable : {hote} ({e})") from None
+    for a in adresses:
+        if not a.is_global or a.is_multicast:
+            raise AdresseRefusee(
+                f"adresse refusée : {hote} pointe vers {a}, qui est sur le réseau "
+                "interne. Un flux doit être servi par une machine publique.")
+
+
+class _RedirectionsVerifiees(urllib.request.HTTPRedirectHandler):
+    """Une redirection est choisie par le serveur distant : elle doit être vérifiée aussi,
+    sinon un site public pourrait renvoyer le collecteur vers 127.0.0.1."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        verifier_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_ouvreur = urllib.request.build_opener(_RedirectionsVerifiees)
+
+
 _verrous_domaine = collections.defaultdict(threading.Lock)
 _verrou_domaines = threading.Lock()
 
@@ -219,8 +300,9 @@ def http(url: str, donnees: dict = None, essais: int = 3, pause: float = None,
             **conditionnel,
             **({"Content-Type": "application/json"} if corps else {})})
         try:
+            verifier_url(url)
             with verrou_domaine(url):
-                with urllib.request.urlopen(req, timeout=delai) as r:
+                with _ouvreur.open(req, timeout=delai) as r:
                     if entetes is not None:
                         entetes["etag"] = r.headers.get("ETag")
                         entetes["derniere_modif"] = r.headers.get("Last-Modified")

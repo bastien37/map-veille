@@ -85,11 +85,12 @@ THEMES = {t["code"]: t["nom"] for t in THEMES_DECLARES}
 THEMES_ACTIFS = [t["code"] for t in THEMES_DECLARES if t["actif"]]
 REGLES_THEMES = {t["code"]: t["mots_cles"] for t in THEMES_DECLARES}
 
-VERSION_SCHEMA = 9   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+VERSION_SCHEMA = 10  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
                     # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs,
                     # pause_jusqu_a ; v7 : themes.actif/ordre, sources.langue/frequence/theme/
                     # origine ; v8 : articles.lat/lon/lieu, table lieux_geocodes ;
-                    # v9 : table evenements, articles.evenement_id
+                    # v9 : table evenements, articles.evenement_id ;
+                    # v10 : index couvrant idx_evenements_fil
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -229,6 +230,11 @@ CREATE INDEX IF NOT EXISTS idx_articles_carte ON articles(masque, date_pub, lat,
 -- temps ; idx_articles_evenement à lister les sources d'un événement.
 CREATE INDEX IF NOT EXISTS idx_evenements_fin       ON evenements(date_fin);
 CREATE INDEX IF NOT EXISTS idx_evenements_carte     ON evenements(theme, date_fin, lat, lon, nb_sources);
+-- v10 : index couvrant du fil groupé. Les compteurs de /api/articles (nombre d'événements,
+-- de nouveautés, d'articles) balayaient la fenêtre entière en ouvrant la table : 82 ms sur
+-- 66 000 événements, contre 11 ms en lisant cet index seul.
+CREATE INDEX IF NOT EXISTS idx_evenements_fil       ON evenements(theme, date_fin DESC,
+                                                     nb_sources, maj, lieu, lat, lon, zone);
 CREATE INDEX IF NOT EXISTS idx_articles_evenement   ON articles(evenement_id);
 """
 
@@ -434,8 +440,10 @@ def purger(cx, maintenant: datetime, collecte_id: int = None) -> int:
     n = cx.execute("DELETE FROM articles WHERE date_pub < ?", (limite,)).rowcount
     cx.execute("DELETE FROM evenements WHERE id NOT IN "
                "(SELECT evenement_id FROM articles WHERE evenement_id IS NOT NULL)")
+    # depuis « fil » et non « articles » : nb_sources compte les sources PUBLIABLES,
+    # celles que le site montre vraiment (zone et thème connus, non masquées)
     cx.execute("""UPDATE evenements SET nb_sources =
-                    (SELECT COUNT(*) FROM articles WHERE evenement_id = evenements.id)""")
+                    (SELECT COUNT(*) FROM fil WHERE evenement_id = evenements.id)""")
     if collecte_id is not None:
         cx.execute("UPDATE collectes SET nb_supprimes = ? WHERE id = ?", (n, collecte_id))
     cx.commit()
@@ -674,6 +682,11 @@ def valider_source(d: dict) -> dict:
     if type_ == "rss":
         if not url or not url.startswith(("http://", "https://")):
             raise ValueError("Un flux RSS a besoin d'une adresse commençant par http:// ou https://.")
+        import collect   # importé ici : base.py ne doit pas dépendre du collecteur au chargement
+        try:   # contrôle d'écriture seulement : le DNS est vérifié au moment de la collecte
+            collect.verifier_forme_url(url)
+        except collect.AdresseRefusee as e:
+            raise ValueError(str(e)) from None
     else:
         url = None   # l'adresse des API est fixée dans le collecteur
     if type_ == "gdacs":
