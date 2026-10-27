@@ -158,6 +158,90 @@ def modifier(article_id: int, m: Modification, _: str = Depends(administrateur),
 
 
 # ---------------------------------------------------------------------------
+# Sources : liste, ajout, modification, suppression, test
+# ---------------------------------------------------------------------------
+class SourceSaisie(BaseModel):
+    nom: Optional[str] = None
+    type: Optional[str] = None
+    url: Optional[str] = None
+    actif: Optional[bool] = None
+    parametres: Optional[dict] = None
+    notes: Optional[str] = None
+
+
+def _avec_statistiques(cx, sources: list) -> list:
+    """Ajoute à chaque source son dernier passage de collecte et son nombre d'articles."""
+    limite = (base.maintenant_utc() - base.DUREE_FIL).isoformat()
+    for s in sources:
+        dernier = cx.execute(
+            """SELECT cs.statut, cs.nb, cs.message, c.debut AS date
+               FROM collectes_sources cs JOIN collectes c ON c.id = cs.collecte_id
+               WHERE cs.source = ? AND c.hors_ligne = 0 ORDER BY c.id DESC LIMIT 1""", (s["nom"],)).fetchone()
+        s["dernier_passage"] = dict(dernier) if dernier else None
+        s["articles"], s["articles_30j"] = cx.execute(
+            "SELECT COUNT(*), COALESCE(SUM(date_pub >= ?), 0) FROM articles WHERE source = ?",
+            (limite, s["nom"])).fetchone()
+        s.pop("fichier_test", None)
+    return sources
+
+
+@routeur.get("/api/admin/sources", tags=["administration"], summary="Sources et leur état")
+def sources(_: str = Depends(administrateur), cx=Depends(connexion_ecriture)):
+    return {"types": base.TYPES_SOURCES, "themes": base.THEMES, "niveaux_gdacs": base.NIVEAUX_GDACS,
+            "sources": _avec_statistiques(cx, base.lister_sources(cx))}
+
+
+@routeur.post("/api/admin/sources", tags=["administration"], status_code=201, summary="Ajouter une source")
+def ajouter_source(saisie: SourceSaisie, _: str = Depends(administrateur), cx=Depends(connexion_ecriture)):
+    try:
+        s = base.ajouter_source(cx, saisie.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return _avec_statistiques(cx, [s])[0]
+
+
+@routeur.patch("/api/admin/sources/{source_id}", tags=["administration"],
+               summary="Modifier une source (nom, adresse, paramètres, activation)")
+def modifier_source(source_id: int, saisie: SourceSaisie, _: str = Depends(administrateur),
+                    cx=Depends(connexion_ecriture)):
+    try:
+        s = base.modifier_source(cx, source_id, saisie.model_dump(exclude_none=True))
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return _avec_statistiques(cx, [s])[0]
+
+
+@routeur.delete("/api/admin/sources/{source_id}", tags=["administration"], status_code=204,
+                summary="Supprimer une source (ses articles déjà collectés sont conservés)")
+def supprimer_source(source_id: int, _: str = Depends(administrateur), cx=Depends(connexion_ecriture)):
+    if not base.supprimer_source(cx, source_id):
+        raise HTTPException(404, f"Aucune source n° {source_id}.")
+
+
+@routeur.post("/api/admin/sources/tester", tags=["administration"],
+              summary="Interroger une source sans rien enregistrer (aperçu et classement)")
+def tester_source(saisie: SourceSaisie, _: str = Depends(administrateur)):
+    import collect
+    try:
+        s = base.valider_source(saisie.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    ref = collect.referentiels()
+    try:
+        lot = collect.collecter_source(base.config_collecte(s), False, ref)
+    except Exception as e:   # adresse fausse, site injoignable, flux illisible…
+        return {"ok": False, "message": str(e), "total": 0, "a_trier": 0, "apercu": []}
+    articles = [collect.trier(a, ref) for a in lot if a["titre"] and a["lien"].startswith("http")]
+    a_trier = sum(1 for a in articles if not a["zone"] or not a["theme"])
+    apercu = [{"titre": a["titre"], "lien": a["lien"], "date": a["date"].isoformat() if a["date"] else None,
+               "zone": a["zone"], "theme": a["theme"]} for a in articles[:10]]
+    return {"ok": True, "total": len(articles), "a_trier": a_trier, "apercu": apercu,
+            "message": f"{len(articles)} articles lus, dont {a_trier} que le tri ne sait pas classer."}
+
+
+# ---------------------------------------------------------------------------
 # Collectes : journal et lancement à la demande
 # ---------------------------------------------------------------------------
 _collecte = {"en_cours": False, "debut": None, "fin": None, "code": None, "sortie": ""}

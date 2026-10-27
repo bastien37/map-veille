@@ -7,7 +7,7 @@ Prototype de l'outil de veille du projet pluridisciplinaire (EAE). Une carte du 
 ```
                  ┌──────────── collecte (1 fois par jour) ────────────┐
 Flux RSS + API ──► collecteur/collect.py ──► donnees/map.sqlite
-(sources.json)     tri zone + thème                 │
+(table sources)    tri zone + thème                 │
                    (regles.json, pays.json)         │ lecture seule
                                                     ▼
                          navigateur ◄── JSON ── serveur/app.py (API FastAPI)
@@ -17,7 +17,7 @@ Flux RSS + API ──► collecteur/collect.py ──► donnees/map.sqlite
 
 Le front ne contient **aucune donnée**, ni actualité, ni liste de zones ou de thèmes, ni tracé de la carte. Il demande tout à l'API, qui lit la base SQLite. Les filtres, les comptages et le repère « Nouveau » sont calculés côté serveur.
 
-1. **Sources** : `collecteur/sources.json` liste les sources. Chacune a un `type` et un interrupteur `actif`.
+1. **Sources** : la table `sources` de la base liste les sources, chacune avec un type et un interrupteur « active ». Elle se gère depuis l'onglet **Sources** de l'administration.
 2. **Collecte** : le script interroge chaque source. Une source en panne ne bloque pas les autres, et son erreur est notée dans le journal de la base.
 3. **Tri** : chaque article reçoit une zone et un thème.
    - Si l'API donne le pays (GDACS, ReliefWeb), la zone vient de `pays.json` et elle est exacte.
@@ -34,6 +34,7 @@ Le front ne contient **aucune donnée**, ni actualité, ni liste de zones ou de 
 | `articles` | Tous les articles collectés : lien (unique), titre, source, date de publication, zone, thème, date d'ajout, correction manuelle, masquage |
 | `zones`, `themes` | Les 6 zones et les 5 thèmes. Les clés étrangères empêchent un code inconnu. |
 | `collectes` | Journal des passages du collecteur : date, éléments lus, nouveaux articles, doublons |
+| `sources` | Les sources à interroger : nom, type (RSS, GDACS, ReliefWeb), adresse, active ou non, paramètres, notes. Remplie au départ avec les 7 sources d'origine. |
 | `collectes_sources` | Pour chaque passage, le résultat de chaque source (ok ou erreur, avec le message) |
 | `fil` (vue) | Les articles publiables, c'est-à-dire avec une zone et un thème, et non masqués |
 | `a_trier` (vue) | Les articles que le tri n'a pas su classer |
@@ -63,17 +64,18 @@ Un article classé à la main n'est plus jamais modifié par le collecteur, et i
 **ReliefWeb** demande un `appname` approuvé pour chaque requête. Pour l'activer :
 1. Demander un appname via le formulaire indiqué sur https://apidoc.reliefweb.int/parameters (par exemple `eae-map-veille`, avec une adresse de contact).
 2. Définir la variable d'environnement `RELIEFWEB_APPNAME` sur la machine qui lance la collecte : `$env:RELIEFWEB_APPNAME="..."` (PowerShell) ou `export RELIEFWEB_APPNAME=...`.
-3. Dans `sources.json`, passer la source ReliefWeb à `"actif": true`.
+3. Dans l'administration, onglet **Sources**, activer la source ReliefWeb.
 
 **GDACS** demande de citer la source sous la forme « Global Disaster Alert and Coordination System, GDACS ». C'est fait automatiquement, car c'est le nom de la source affiché sous chaque alerte.
 
 ## Interface d'administration
 
-Une console web, réservée à l'équipe, est disponible sur **http://localhost:8000/admin**. Elle a quatre onglets :
+Une console web, réservée à l'équipe, est disponible sur **http://localhost:8000/admin**. Elle a cinq onglets :
 
 - **Tableau de bord** : chiffres clés, articles visibles par zone et par thème, activité de chaque source.
 - **À trier** : les articles que le tri automatique n'a pas su classer. On choisit leur zone et leur thème puis on clique sur « Classer » : l'article apparaît aussitôt sur le site. « Masquer » écarte un article hors sujet (actualité française, culture…).
 - **Articles** : recherche dans les titres, filtres par statut, zone et thème. On peut reclasser n'importe quel article, le masquer ou le réafficher. Un article masqué reste dans la base mais disparaît du site.
+- **Sources** : la liste des sources, avec pour chacune son dernier passage (ok ou erreur) et son nombre d'articles. On peut en ajouter, les modifier, les activer ou les désactiver d'un clic, et les supprimer (leurs articles déjà collectés restent). Le bouton « Tester sans enregistrer » interroge une source et montre un aperçu des articles et de leur classement, sans rien écrire dans la base : pratique pour vérifier l'adresse d'un nouveau flux RSS.
 - **Collectes** : bouton « Lancer la collecte » et journal des passages, avec l'état et le message d'erreur de chaque source.
 
 L'accès est protégé par un mot de passe. L'identifiant est `admin`, et le mot de passe est celui de la variable d'environnement `MAP_ADMIN_MOT_DE_PASSE`. Sans cette variable, l'administration est désactivée.
@@ -176,8 +178,13 @@ Le workflow GitHub `.github/workflows/tests.yml` ne publie plus le site : il lan
 
 ## Ajouter une source
 
-- **Un flux RSS** : ajouter une ligne `{"type": "rss", "nom": "...", "url": "...", "actif": true}`.
-- **Une autre API** : écrire une fonction `source_xxx(s, hors_ligne, ...)` dans `collect.py`. Elle renvoie une liste construite avec `article(titre, lien, date, source, resume, zone=, theme=)`. Il reste ensuite à l'appeler dans `main()`. Le tri, les doublons et le stockage sont gérés en commun.
+- **Un flux RSS, ou une source GDACS ou ReliefWeb avec d'autres réglages** : dans l'administration, onglet **Sources**, « Ajouter une source ». Testez-la avant de l'enregistrer.
+- **Un nouveau type d'API** : il faut du code.
+  1. Écrire une fonction `source_xxx(s, hors_ligne, ...)` dans `collect.py`. Elle renvoie une liste construite avec `article(titre, lien, date, source, resume, zone=, theme=)`.
+  2. L'appeler dans `collecter_source()`.
+  3. Ajouter le type dans `TYPES_SOURCES` et dans la contrainte `CHECK` de la table `sources` (`base.py`).
+
+  Le tri, les doublons et le stockage sont gérés en commun.
 
 ## Codes
 

@@ -3,7 +3,7 @@
 MAP – Monitoring de l'Actualité Planétaire
 Collecteur : sources -> collecte -> tri -> stockage (chaîne de l'information, partie 6).
 
-Types de sources (collecteur/sources.json) :
+Types de sources (table « sources » de la base, gérée depuis l'administration) :
     rss        flux RSS 2.0 ou Atom d'un média
     gdacs      API GDACS (alertes catastrophes ONU / Commission européenne, sans clé)
     reliefweb  API ReliefWeb v2 (rapports humanitaires OCHA, appname approuvé requis)
@@ -38,7 +38,6 @@ import feedparser
 import base   # stockage SQLite (collecteur/base.py)
 
 RACINE = Path(__file__).resolve().parent.parent
-SOURCES = RACINE / "collecteur" / "sources.json"
 REGLES = RACINE / "collecteur" / "regles.json"
 PAYS = RACINE / "collecteur" / "pays.json"
 POIDS_TITRE, POIDS_RESUME = 3, 1
@@ -251,6 +250,34 @@ def source_reliefweb(s, hors_ligne, pays_zone):
 # ======================================================================
 # Programme principal
 # ======================================================================
+def referentiels() -> dict:
+    """Règles de tri et correspondances pays -> zone, chargées une fois par collecte."""
+    regles = json.loads(REGLES.read_text(encoding="utf-8"))
+    pays = json.loads(PAYS.read_text(encoding="utf-8"))
+    noms_fr = pays.pop("noms_fr", {})
+    return {"zones": compiler(regles["zones"]), "themes": compiler(regles["themes"]), "noms_fr": noms_fr,
+            "pays_zone": {iso: z for z, codes in pays.items() if not z.startswith("_") for iso in codes}}
+
+
+def collecter_source(s: dict, hors_ligne: bool, ref: dict) -> list:
+    """Interroge une source (configuration issue de base.config_collecte) et renvoie ses articles."""
+    t = s["type"]
+    if t == "rss":
+        return source_rss(s, hors_ligne)
+    if t == "gdacs":
+        return source_gdacs(s, hors_ligne, ref["pays_zone"], ref["noms_fr"])
+    if t == "reliefweb":
+        return source_reliefweb(s, hors_ligne, ref["pays_zone"])
+    raise ValueError(f"type inconnu : {t}")
+
+
+def trier(a: dict, ref: dict) -> dict:
+    """Étape 3 : zone et thème (ceux fournis par l'API d'abord, puis les mots-clés)."""
+    a["zone"] = a["zone"] or classer(a["titre"], a["resume"], ref["zones"])
+    a["theme"] = a["theme"] or classer(a["titre"], a["resume"], ref["themes"]) or a["indice_theme"]
+    return a
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Collecte et tri des actualités pour MAP")
     ap.add_argument("--hors-ligne", action="store_true", help="utilise les fichiers de test au lieu des API")
@@ -260,12 +287,7 @@ def main(argv=None):
                     help="ancien data.json repris si la base est vide (migration)")
     args = ap.parse_args(argv)
 
-    regles = json.loads(REGLES.read_text(encoding="utf-8"))
-    zones, themes = compiler(regles["zones"]), compiler(regles["themes"])
-    pays = json.loads(PAYS.read_text(encoding="utf-8"))
-    noms_fr = pays.pop("noms_fr", {})
-    pays_zone = {iso: z for z, codes in pays.items() if not z.startswith("_") for iso in codes}
-    conf = json.loads(SOURCES.read_text(encoding="utf-8"))
+    ref = referentiels()
 
     cx = base.ouvrir(args.base)
     if not cx.execute("SELECT 1 FROM articles LIMIT 1").fetchone():
@@ -283,19 +305,11 @@ def main(argv=None):
             base.noter_source(cx, collecte, nom or Path(chemin).stem, True, len(lot))
             bruts += lot
     else:
-        for s in conf["sources"]:
-            if not s.get("actif") or (args.hors_ligne and s["type"] == "rss"):
-                continue
+        for s in map(base.config_collecte, base.lister_sources(cx, actives=True)):
+            if args.hors_ligne and not s.get("fichier_test"):
+                continue   # hors ligne : seules les sources qui ont une réponse enregistrée
             try:
-                t = s["type"]
-                if t == "rss":
-                    lot = source_rss(s, args.hors_ligne)
-                elif t == "gdacs":
-                    lot = source_gdacs(s, args.hors_ligne, pays_zone, noms_fr)
-                elif t == "reliefweb":
-                    lot = source_reliefweb(s, args.hors_ligne, pays_zone)
-                else:
-                    raise ValueError(f"type inconnu : {t}")
+                lot = collecter_source(s, args.hors_ligne, ref)
                 bruts += lot
                 base.noter_source(cx, collecte, s["nom"], True, len(lot))
                 print(f"[ok]     {s['nom']} : {len(lot)} éléments")
@@ -308,8 +322,7 @@ def main(argv=None):
     for a in bruts:
         if not a["titre"] or not a["lien"].startswith("http"):
             continue
-        a["zone"] = a["zone"] or classer(a["titre"], a["resume"], zones)
-        a["theme"] = a["theme"] or classer(a["titre"], a["resume"], themes) or a["indice_theme"]
+        trier(a, ref)
         compte[base.enregistrer(cx, a, normaliser(a["titre"]), MAINTENANT, collecte)] += 1
     base.fin_collecte(cx, collecte, base.maintenant_utc(), len(bruts), compte["nouveau"], compte["doublon"])
 

@@ -34,7 +34,31 @@ THEMES = {
     "cli": "Climat et catastrophes naturelles",
 }
 
-VERSION_SCHEMA = 2   # v2 : colonne articles.masque (modération depuis l'administration)
+VERSION_SCHEMA = 3   # v2 : colonne articles.masque ; v3 : table sources (gérée depuis l'administration)
+
+TYPES_SOURCES = {
+    "rss": "Flux RSS / Atom",
+    "gdacs": "API GDACS (alertes catastrophes)",
+    "reliefweb": "API ReliefWeb (rapports humanitaires)",
+}
+NIVEAUX_GDACS = ("green", "orange", "red")
+
+# Sources installées à la création de la base (ou à la migration vers v3).
+# Ensuite, la liste se gère uniquement depuis l'administration (onglet Sources).
+SOURCES_INITIALES = [
+    {"nom": "Le Monde", "type": "rss", "url": "https://www.lemonde.fr/international/rss_full.xml", "actif": True},
+    {"nom": "France 24", "type": "rss", "url": "https://www.france24.com/fr/rss", "actif": True},
+    {"nom": "RFI", "type": "rss", "url": "https://www.rfi.fr/fr/rss", "actif": True},
+    {"nom": "franceinfo", "type": "rss", "url": "https://www.francetvinfo.fr/monde.rss", "actif": True},
+    {"nom": "Courrier international", "type": "rss",
+     "url": "https://www.courrierinternational.com/feed/all/rss.xml", "actif": False},
+    {"nom": "GDACS (ONU / Commission européenne)", "type": "gdacs", "actif": True,
+     "parametres": {"niveaux": ["orange", "red"], "jours": 7}, "fichier_test": "tests/gdacs.json",
+     "notes": "Alertes de catastrophes naturelles. Citer « Global Disaster Alert and Coordination System, GDACS »."},
+    {"nom": "ReliefWeb (OCHA)", "type": "reliefweb", "actif": False,
+     "parametres": {"theme_defaut": "dip"}, "fichier_test": "tests/reliefweb.json",
+     "notes": "Nécessite un appname approuvé par ReliefWeb, dans la variable d'environnement RELIEFWEB_APPNAME."},
+]
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS zones (
     code  TEXT PRIMARY KEY,
@@ -78,6 +102,18 @@ CREATE TABLE IF NOT EXISTS articles (
 );
 CREATE INDEX IF NOT EXISTS idx_articles_date  ON articles(date_pub);
 CREATE INDEX IF NOT EXISTS idx_articles_titre ON articles(titre_norm);
+CREATE TABLE IF NOT EXISTS sources (
+    id           INTEGER PRIMARY KEY,
+    nom          TEXT NOT NULL UNIQUE,           -- nom affiché sous chaque article
+    type         TEXT NOT NULL CHECK (type IN ('rss', 'gdacs', 'reliefweb')),
+    url          TEXT,                           -- obligatoire pour un flux RSS
+    actif        INTEGER NOT NULL DEFAULT 1 CHECK (actif IN (0, 1)),
+    parametres   TEXT NOT NULL DEFAULT '{}',     -- JSON propre au type (niveaux GDACS, thème par défaut…)
+    fichier_test TEXT,                           -- réponse enregistrée pour le mode --hors-ligne
+    notes        TEXT,                           -- conditions d'utilisation, validation LT3…
+    ajout        TEXT NOT NULL,
+    maj          TEXT NOT NULL
+);
 """
 
 VUES = """
@@ -124,6 +160,9 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
                            "CHECK (masque IN (0, 1))")
             for instruction in _instructions(VUES):
                 cx.execute(instruction)
+            if not cx.execute("SELECT 1 FROM sources LIMIT 1").fetchone():   # migration vers v3
+                for s in SOURCES_INITIALES:
+                    _inserer_source(cx, s)
             cx.executemany("INSERT OR REPLACE INTO zones VALUES (?, ?)", ZONES.items())
             cx.executemany("INSERT OR REPLACE INTO themes VALUES (?, ?)", THEMES.items())
             cx.execute(f"PRAGMA user_version = {VERSION_SCHEMA}")
@@ -252,6 +291,126 @@ def importer_json(cx, chemin, normaliser) -> int:
         n += cur.rowcount
     cx.commit()
     return n
+
+
+# ---------------------------------------------------------------------------
+# Sources (gérées depuis l'administration)
+# ---------------------------------------------------------------------------
+def valider_source(d: dict) -> dict:
+    """Contrôle et normalise une source saisie. Lève ValueError avec un message lisible."""
+    nom = (d.get("nom") or "").strip()
+    if not 1 <= len(nom) <= 80:
+        raise ValueError("Le nom est obligatoire (80 caractères au plus).")
+    type_ = d.get("type")
+    if type_ not in TYPES_SOURCES:
+        raise ValueError(f"Type inconnu : {type_}. Types possibles : {', '.join(TYPES_SOURCES)}.")
+    url = (d.get("url") or "").strip() or None
+    p = d.get("parametres") or {}
+    parametres = {}
+    if type_ == "rss":
+        if not url or not url.startswith(("http://", "https://")):
+            raise ValueError("Un flux RSS a besoin d'une adresse commençant par http:// ou https://.")
+    else:
+        url = None   # l'adresse des API est fixée dans le collecteur
+    if type_ == "gdacs":
+        demandes = p["niveaux"] if "niveaux" in p else ["orange", "red"]   # liste vide = erreur, pas défaut
+        niveaux = [n for n in NIVEAUX_GDACS if n in (demandes or [])]
+        if not niveaux:
+            raise ValueError("Choisissez au moins un niveau d'alerte GDACS.")
+        try:
+            jours = int(p.get("jours", 7))
+        except (TypeError, ValueError):
+            raise ValueError("La période GDACS doit être un nombre de jours.") from None
+        if not 1 <= jours <= 30:
+            raise ValueError("La période GDACS doit être comprise entre 1 et 30 jours.")
+        parametres = {"niveaux": niveaux, "jours": jours}
+    if type_ == "reliefweb":
+        theme = p.get("theme_defaut", "dip")
+        if theme not in THEMES:
+            raise ValueError(f"Thème par défaut inconnu : {theme}.")
+        parametres = {"theme_defaut": theme}
+    notes = (d.get("notes") or "").strip()[:1000] or None
+    return {"nom": nom, "type": type_, "url": url, "actif": bool(d.get("actif", True)),
+            "parametres": parametres, "notes": notes, "fichier_test": d.get("fichier_test")}
+
+
+def _inserer_source(cx, s: dict) -> int:
+    maintenant = maintenant_utc().isoformat()
+    cur = cx.execute(
+        """INSERT INTO sources (nom, type, url, actif, parametres, fichier_test, notes, ajout, maj)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (s["nom"], s["type"], s.get("url"), int(bool(s.get("actif", True))),
+         json.dumps(s.get("parametres") or {}, ensure_ascii=False), s.get("fichier_test"),
+         s.get("notes"), maintenant, maintenant))
+    return cur.lastrowid
+
+
+def _source(ligne) -> dict:
+    d = dict(ligne)
+    d["actif"] = bool(d["actif"])
+    d["parametres"] = json.loads(d["parametres"] or "{}")
+    return d
+
+
+def lister_sources(cx, actives: bool = False) -> list:
+    sql = "SELECT * FROM sources" + (" WHERE actif = 1" if actives else "") + " ORDER BY type, nom COLLATE NOCASE"
+    return [_source(r) for r in cx.execute(sql)]
+
+
+def lire_source(cx, source_id: int):
+    r = cx.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
+    return _source(r) if r else None
+
+
+def config_collecte(s: dict) -> dict:
+    """Forme attendue par les connecteurs du collecteur (type, nom, url, fichier_test, paramètres)."""
+    conf = {"type": s["type"], "nom": s["nom"], "url": s.get("url"), "fichier_test": s.get("fichier_test")}
+    p = s.get("parametres") or {}
+    if s["type"] == "gdacs":
+        conf["niveaux"] = ";".join(p.get("niveaux") or ["orange", "red"])
+        conf["jours"] = p.get("jours", 7)
+    if s["type"] == "reliefweb":
+        conf["theme_defaut"] = p.get("theme_defaut", "dip")
+    return conf
+
+
+def ajouter_source(cx, d: dict) -> dict:
+    s = valider_source(d)
+    try:
+        ident = _inserer_source(cx, s)
+    except sqlite3.IntegrityError:
+        raise ValueError(f"Une source s'appelle déjà « {s['nom']} ».") from None
+    cx.commit()
+    return lire_source(cx, ident)
+
+
+def modifier_source(cx, source_id: int, d: dict) -> dict:
+    """Met à jour une source. Un changement de nom est reporté sur ses articles et son journal."""
+    ancienne = lire_source(cx, source_id)
+    if not ancienne:
+        raise LookupError(f"Aucune source n° {source_id}.")
+    s = valider_source({**ancienne, **d, "parametres": {**ancienne["parametres"], **(d.get("parametres") or {})}})
+    try:
+        cx.execute(
+            """UPDATE sources SET nom = ?, type = ?, url = ?, actif = ?, parametres = ?, notes = ?, maj = ?
+               WHERE id = ?""",
+            (s["nom"], s["type"], s["url"], int(s["actif"]), json.dumps(s["parametres"], ensure_ascii=False),
+             s["notes"], maintenant_utc().isoformat(), source_id))
+    except sqlite3.IntegrityError:
+        cx.rollback()
+        raise ValueError(f"Une source s'appelle déjà « {s['nom']} ».") from None
+    if s["nom"] != ancienne["nom"]:
+        cx.execute("UPDATE articles SET source = ? WHERE source = ?", (s["nom"], ancienne["nom"]))
+        cx.execute("UPDATE collectes_sources SET source = ? WHERE source = ?", (s["nom"], ancienne["nom"]))
+    cx.commit()
+    return lire_source(cx, source_id)
+
+
+def supprimer_source(cx, source_id: int) -> bool:
+    """Supprime la source de la liste. Ses articles déjà collectés restent dans la base."""
+    cur = cx.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+    cx.commit()
+    return cur.rowcount == 1
 
 
 def maintenant_utc() -> datetime:
