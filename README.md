@@ -173,6 +173,36 @@ Le site a maintenant besoin d'un **serveur qui exécute Python** : GitHub Pages,
    Le serveur lit la base en lecture seule, et SQLite (mode WAL) autorise cette lecture pendant que la collecte écrit. Il n'y a rien à redémarrer après une collecte.
 3. **Le lien Moodle** (C02) pointe vers l'adresse du serveur.
 
+### Exemple : Alwaysdata
+
+Sur Alwaysdata, on n'installe pas uv (66 Mo, trop pour l'offre gratuite). On utilise `pip` avec `requirements.txt`, généré depuis `uv.lock`. Remplacer `NOM` par le nom du compte Alwaysdata.
+
+1. **Environnement > Python** : choisir la version 3.12.
+2. **En SSH** (`ssh NOM@ssh-NOM.alwaysdata.net`), récupérer le code et installer :
+   ```bash
+   git clone git@github.com:bastien37/map-veille.git ~/map-veille   # clé de déploiement GitHub, voir ci-dessous
+   cd ~/map-veille
+   python -m venv .venv
+   .venv/bin/python -m pip install -r requirements.txt
+   .venv/bin/python collecteur/collect.py          # première collecte : crée la base
+   ```
+3. **Web > Sites > Ajouter un site**, type **Programme utilisateur** :
+   - commande : `/home/NOM/map-veille/.venv/bin/uvicorn serveur.app:app --host $IP --port $PORT`
+   - répertoire de travail : `/home/NOM/map-veille`
+   - variable d'environnement : `MAP_ADMIN_MOT_DE_PASSE=...`
+4. **Avancé > Tâches planifiées**, une commande chaque jour (`15 6 * * *`) :
+   `cd /home/NOM/map-veille && .venv/bin/python collecteur/collect.py`
+5. **Mise à jour** du code :
+   ```bash
+   cd ~/map-veille && git pull && .venv/bin/python -m pip install -r requirements.txt
+   ```
+   puis redémarrer le site dans **Web > Sites**.
+
+Pour un dépôt privé, on donne au serveur une **clé de déploiement** en lecture seule. On la crée en SSH (`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""`), puis on colle `~/.ssh/id_ed25519.pub` dans GitHub, *Settings > Deploy keys*.
+
+Après chaque `uv add`, il faut régénérer `requirements.txt` :
+`uv export --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt`, puis remettre les trois lignes de commentaire en tête du fichier.
+
 Options possibles : un serveur de l'École (le plus adapté au contexte, à voir avec le service informatique), ou un hébergeur Python comme PythonAnywhere, Render ou Alwaysdata. Ce dernier est français et propose une offre gratuite limitée. Dans tous les cas, l'hébergeur doit autoriser une tâche planifiée et l'accès sortant aux sites des sources.
 
 Le workflow GitHub `.github/workflows/tests.yml` ne publie plus le site : il lance seulement les tests à chaque modification du code.
