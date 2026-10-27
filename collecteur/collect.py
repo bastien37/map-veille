@@ -14,6 +14,7 @@ Utilisation (bibliothèques gérées par uv, voir pyproject.toml) :
     uv run collecteur/collect.py --fichiers a.xml # test sur des flux RSS enregistrés
 
 Les articles sont stockés dans la base SQLite donnees/map.sqlite (voir base.py).
+À chaque collecte, les articles publiés il y a plus de 30 jours sont supprimés (D05).
 Le site les lit à travers l'API (serveur/app.py) : aucune donnée n'est écrite dans le front.
 
 Seuls le titre, la source, la date et le lien sont conservés (exigence C03).
@@ -295,6 +296,9 @@ def main(argv=None):
         if n:
             print(f"Migration : {n} articles repris de l'ancien {Path(args.migrer).name}.")
     collecte = base.debut_collecte(cx, MAINTENANT, args.hors_ligne)
+    supprimes = base.purger(cx, MAINTENANT, collecte)   # D05 : plus de 30 jours -> supprimé
+    if supprimes:
+        print(f"Suppression : {supprimes} articles publiés il y a plus de 30 jours.")
 
     # 1-2. Sources et collecte
     bruts = []
@@ -318,7 +322,7 @@ def main(argv=None):
                 print(f"[erreur] {s['nom']} : {e}")
 
     # 3. Tri, puis 4. stockage dans la base
-    compte = {"nouveau": 0, "maj": 0, "inchange": 0, "doublon": 0}
+    compte = {"nouveau": 0, "maj": 0, "inchange": 0, "doublon": 0, "ancien": 0}
     for a in bruts:
         if not a["titre"] or not a["lien"].startswith("http"):
             continue
@@ -331,7 +335,8 @@ def main(argv=None):
     a_trier = cx.execute("SELECT COUNT(*) FROM a_trier").fetchone()[0]
     total = cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
     cx.close()
-    print(f"{compte['nouveau']} nouveaux articles, {compte['doublon']} doublons écartés.")
+    print(f"{compte['nouveau']} nouveaux articles, {compte['doublon']} doublons écartés, "
+          f"{compte['ancien']} trop anciens ignorés.")
     print(f"Base : {total} articles au total, {a_trier} à trier (uv run collecteur/admin.py a-trier).")
     print(f"Fil  : {publies} articles visibles sur le site (30 derniers jours), servis par l'API.")
     if not bruts and not total:

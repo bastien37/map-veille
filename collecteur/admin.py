@@ -38,7 +38,8 @@ def cmd_stats(cx, args):
     for c in cx.execute("SELECT * FROM collectes ORDER BY id DESC LIMIT 5").fetchall():
         mode = " (hors ligne)" if c["hors_ligne"] else ""
         print(f"  n° {c['id']} – {c['debut'][:16].replace('T', ' ')} UTC{mode} : "
-              f"{c['nb_lus']} lus, {c['nb_nouveaux']} nouveaux, {c['nb_doublons']} doublons")
+              f"{c['nb_lus']} lus, {c['nb_nouveaux']} nouveaux, {c['nb_doublons']} doublons, "
+              f"{c['nb_supprimes']} supprimés")
         for s in cx.execute("SELECT * FROM collectes_sources WHERE collecte_id = ?", (c["id"],)):
             detail = f"{s['nb']} éléments" if s["statut"] == "ok" else s["message"]
             print(f"      [{s['statut']:6}] {s['source']} : {detail}")

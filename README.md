@@ -22,8 +22,9 @@ Le front ne contient **aucune donnée**, ni actualité, ni liste de zones ou de 
 3. **Tri** : chaque article reçoit une zone et un thème.
    - Si l'API donne le pays (GDACS, ReliefWeb), la zone vient de `pays.json` et elle est exacte.
    - Sinon, la zone et le thème viennent des mots-clés de `regles.json`. Un mot dans le titre vaut 3 points, dans le résumé 1 point.
-4. **Stockage** : la base `donnees/map.sqlite` ne garde que le titre, la source, la date, la zone, le thème et le lien (C03). Les doublons sont écartés, qu'ils aient le même lien ou le même titre (D03). La base conserve tout l'historique.
-5. **Diffusion** : l'API sert le fil des 30 derniers jours (D05). Un article sans zone ou sans thème reste dans la base, mais elle ne le diffuse pas (D04).
+4. **Stockage** : la base `donnees/map.sqlite` ne garde que le titre, la source, la date, la zone, le thème et le lien (C03). Les doublons sont écartés, qu'ils aient le même lien ou le même titre (D03).
+   **À chaque collecte, les articles publiés il y a plus de 30 jours sont supprimés définitivement (D05)**, y compris ceux classés à la main ou masqués. Un article déjà vieux de plus de 30 jours n'est pas enregistré. Le nombre d'articles supprimés est noté dans le journal des collectes.
+5. **Diffusion** : l'API sert le fil des 30 derniers jours. Un article sans zone ou sans thème reste dans la base, mais elle ne le diffuse pas (D04).
 
 ## La base de données
 
@@ -33,7 +34,7 @@ Le front ne contient **aucune donnée**, ni actualité, ni liste de zones ou de 
 |---|---|
 | `articles` | Tous les articles collectés : lien (unique), titre, source, date de publication, zone, thème, date d'ajout, correction manuelle, masquage |
 | `zones`, `themes` | Les 6 zones et les 5 thèmes. Les clés étrangères empêchent un code inconnu. |
-| `collectes` | Journal des passages du collecteur : date, éléments lus, nouveaux articles, doublons |
+| `collectes` | Journal des passages du collecteur : date, éléments lus, nouveaux articles, doublons, articles supprimés |
 | `sources` | Les sources à interroger : nom, type (RSS, GDACS, ReliefWeb), adresse, active ou non, paramètres, notes. Remplie au départ avec les 7 sources d'origine. |
 | `collectes_sources` | Pour chaque passage, le résultat de chaque source (ok ou erreur, avec le message) |
 | `fil` (vue) | Les articles publiables, c'est-à-dire avec une zone et un thème, et non masqués |

@@ -1,8 +1,9 @@
 """
 MAP – Stockage SQLite (étape 4 de la chaîne de l'information).
 
-La base donnees/map.sqlite est la seule source des données : elle garde TOUT l'historique
-(archivage, D05), les articles à trier (D04), les corrections manuelles et le journal des collectes.
+La base donnees/map.sqlite est la seule source des données : les articles des 30 derniers jours
+(D05 : les plus anciens sont supprimés à chaque collecte), les articles à trier (D04),
+les corrections manuelles, les sources et le journal des collectes.
 Le front ne contient aucune donnée : il les demande à l'API (serveur/app.py), qui lit cette base.
 
 Module standard sqlite3 : aucune bibliothèque à installer.
@@ -15,7 +16,7 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parent.parent
 BASE = RACINE / "donnees" / "map.sqlite"
 ANCIEN_JSON = RACINE / "site" / "data.json"   # ancien format, lu une seule fois pour la migration
-DUREE_FIL = timedelta(days=30)   # D05 : le fil affiche 30 jours, la base garde tout
+DUREE_FIL = timedelta(days=30)   # D05 : durée de conservation ; au-delà, l'article est supprimé à la collecte
 DUREE_NOUVEAU = timedelta(hours=48)   # F06 : repère « Nouveau »
 
 ZONES = {
@@ -34,7 +35,7 @@ THEMES = {
     "cli": "Climat et catastrophes naturelles",
 }
 
-VERSION_SCHEMA = 3   # v2 : colonne articles.masque ; v3 : table sources (gérée depuis l'administration)
+VERSION_SCHEMA = 4   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -75,7 +76,8 @@ CREATE TABLE IF NOT EXISTS collectes (
     hors_ligne  INTEGER NOT NULL DEFAULT 0,
     nb_lus      INTEGER NOT NULL DEFAULT 0, -- éléments reçus des sources
     nb_nouveaux INTEGER NOT NULL DEFAULT 0, -- articles ajoutés à la base
-    nb_doublons INTEGER NOT NULL DEFAULT 0
+    nb_doublons INTEGER NOT NULL DEFAULT 0,
+    nb_supprimes INTEGER NOT NULL DEFAULT 0 -- articles de plus de 30 jours supprimés (D05)
 );
 CREATE TABLE IF NOT EXISTS collectes_sources (
     collecte_id INTEGER NOT NULL REFERENCES collectes(id) ON DELETE CASCADE,
@@ -158,6 +160,8 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
             if "masque" not in colonnes:      # migration d'une base v1
                 cx.execute("ALTER TABLE articles ADD COLUMN masque INTEGER NOT NULL DEFAULT 0 "
                            "CHECK (masque IN (0, 1))")
+            if "nb_supprimes" not in {r["name"] for r in cx.execute("PRAGMA table_info(collectes)")}:
+                cx.execute("ALTER TABLE collectes ADD COLUMN nb_supprimes INTEGER NOT NULL DEFAULT 0")   # v4
             for instruction in _instructions(VUES):
                 cx.execute(instruction)
             if not cx.execute("SELECT 1 FROM sources LIMIT 1").fetchone():   # migration vers v3
@@ -214,16 +218,30 @@ def fin_collecte(cx, collecte_id: int, fin: datetime, nb_lus: int, nb_nouveaux: 
     cx.commit()
 
 
+def purger(cx, maintenant: datetime, collecte_id: int = None) -> int:
+    """D05 : supprime définitivement les articles publiés il y a plus de 30 jours
+    (y compris ceux classés à la main ou masqués). Renvoie le nombre d'articles supprimés."""
+    limite = (maintenant - DUREE_FIL).isoformat()
+    n = cx.execute("DELETE FROM articles WHERE date_pub < ?", (limite,)).rowcount
+    if collecte_id is not None:
+        cx.execute("UPDATE collectes SET nb_supprimes = ? WHERE id = ?", (n, collecte_id))
+    cx.commit()
+    return n
+
+
 # ---------------------------------------------------------------------------
 # Enregistrement d'un article
 # ---------------------------------------------------------------------------
 def enregistrer(cx, a: dict, titre_norm: str, maintenant: datetime, collecte_id: int) -> str:
     """
-    Enregistre un article trié. Renvoie 'nouveau', 'maj', 'inchange' ou 'doublon'.
+    Enregistre un article trié. Renvoie 'nouveau', 'maj', 'inchange', 'doublon' ou 'ancien'.
+      - publié il y a plus de 30 jours : pas enregistré, il serait supprimé à la collecte suivante (D05) ;
       - lien déjà connu : on garde la date d'ajout ; on ne complète le classement
         que s'il manquait, et jamais si l'article a été corrigé à la main ;
       - titre déjà connu sous un autre lien (même dépêche reprise ailleurs) : doublon (D03).
     """
+    if a["date"] and a["date"] < maintenant - DUREE_FIL:
+        return "ancien"
     ligne = cx.execute("SELECT id, zone, theme, manuel FROM articles WHERE lien = ?",
                        (a["lien"],)).fetchone()
     if ligne:

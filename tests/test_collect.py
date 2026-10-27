@@ -116,15 +116,49 @@ def test_aucune_donnee_ecrite_dans_le_front(tmp_path):
     assert not (RACINE / "site" / "data.json").exists() and not (RACINE / "site" / "data.js").exists()
 
 
-def test_archive_et_a_trier(tmp_path):
+def test_a_trier_et_article_trop_ancien(tmp_path):
     fil = lancer(tmp_path, "--fichiers", f"Test={TESTS / 'flux_test_rss.xml'}")
     cx = base.ouvrir(tmp_path / "map.sqlite")
-    # 6 liens distincts : 1 sans zone (actualité française), 1 trop ancien (gardé en base, hors du fil)
-    assert cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 6
+    # 6 liens distincts : 1 sans zone (actualité française) gardé à trier, 1 de juin 2026 jamais enregistré
+    assert cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 5
     assert [r["titre"] for r in cx.execute("SELECT titre FROM a_trier")] == \
         ["Réforme des retraites : le débat reprend à l'Assemblée"]
     assert len(fil) == 4
     assert all("hors fenêtre" not in a["titre"] for a in fil)
+
+
+def test_collecte_supprime_les_articles_de_plus_de_30_jours(tmp_path):
+    from datetime import timedelta
+    lancer(tmp_path, "--hors-ligne")
+    cx = base.ouvrir(tmp_path / "map.sqlite")
+    vieux = (base.maintenant_utc() - timedelta(days=31)).isoformat()
+    limite = (base.maintenant_utc() - timedelta(days=29)).isoformat()
+    for i, (date, manuel, masque) in enumerate([(vieux, 0, 0), (vieux, 1, 0), (vieux, 0, 1), (limite, 1, 0)]):
+        cx.execute("""INSERT INTO articles (lien, titre, titre_norm, source, date_pub, zone, theme, manuel, masque, ajout, maj)
+                      VALUES (?, ?, ?, 'Test', ?, 'eur', 'def', ?, ?, ?, ?)""",
+                   (f"https://a.test/{i}", f"Article {i}", f" article {i} ", date, manuel, masque, date, date))
+    cx.commit()
+    cx.close()
+    lancer(tmp_path, "--hors-ligne")
+    cx = base.ouvrir(tmp_path / "map.sqlite")
+    restants = [r[0] for r in cx.execute("SELECT lien FROM articles WHERE source = 'Test'")]
+    assert restants == ["https://a.test/3"]   # les 3 vieux (même manuel ou masqué) supprimés, le récent gardé
+    assert cx.execute("SELECT nb_supprimes FROM collectes ORDER BY id DESC LIMIT 1").fetchone()[0] == 3
+
+
+def test_migration_v3_vers_v4(tmp_path):
+    import sqlite3
+    chemin = tmp_path / "v3.sqlite"
+    cx = sqlite3.connect(chemin)
+    cx.executescript(base.SCHEMA.replace(
+        "    nb_doublons INTEGER NOT NULL DEFAULT 0,\n    nb_supprimes INTEGER NOT NULL DEFAULT 0 -- articles de plus de 30 jours supprimés (D05)\n",
+        "    nb_doublons INTEGER NOT NULL DEFAULT 0\n"))
+    cx.execute("PRAGMA user_version = 3")
+    cx.commit()
+    cx.close()
+    cx = base.ouvrir(chemin)
+    assert "nb_supprimes" in {r["name"] for r in cx.execute("PRAGMA table_info(collectes)")}
+    assert base.a_jour(cx)
 
 
 def test_doublon_par_titre(tmp_path):

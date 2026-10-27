@@ -49,7 +49,7 @@ def test_page_admin(client):
 def test_tableau(client):
     d = client.get("/api/admin/tableau", auth=AUTH).json()
     assert d["compteurs"]["a_trier"] == 1
-    assert d["compteurs"]["total"] == 9
+    assert d["compteurs"]["total"] == 8   # l'article de juin 2026 du flux de test n'est pas enregistré
     assert d["croise"]["asi"]["cli"] == 1
 
 

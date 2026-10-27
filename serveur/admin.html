@@ -479,7 +479,7 @@ async function chargerJournal(){
       <div style="display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline">
         <b class="mono">n° ${c.id}</b><span class="mono">${fmt(c.debut)}</span>
         ${c.hors_ligne?'<span class="pastille p-trier">test hors ligne</span>':""}
-        ${c.fin?`<span class="muted">${c.nb_lus} lus · <b>${c.nb_nouveaux} nouveaux</b> · ${c.nb_doublons} doublons</span>`:'<span class="pastille p-trier">inachevée</span>'}
+        ${c.fin?`<span class="muted">${c.nb_lus} lus · <b>${c.nb_nouveaux} nouveaux</b> · ${c.nb_doublons} doublons${c.nb_supprimes?` · ${c.nb_supprimes} supprimés (plus de 30 jours)`:""}</span>`:'<span class="pastille p-trier">inachevée</span>'}
       </div>
       <div class="sources">${c.sources.map(s=>`<div><span class="pastille ${s.statut==="ok"?"p-ok":"p-err"}">${s.statut}</span><span>${esc(s.source)}</span>
         <span class="muted">${s.statut==="ok"?s.nb+" éléments":esc(s.message)}</span></div>`).join("")}</div></div>`).join("")
