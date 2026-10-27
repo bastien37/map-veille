@@ -39,6 +39,73 @@ def test_mot_court_ne_matche_pas_dans_un_autre_mot():
     assert collect.classer("Une attaque publique", "", ZONES) is None
 
 
+# ---------- le tri rapide doit donner exactement le même résultat que la version de référence ----------
+def _classer_reference(titre, resume, regles):
+    """Implémentation de référence, volontairement naïve : une expression régulière par
+    mot-clé, toutes essayées sur chaque article. C'est la version d'origine du tri, gardée
+    ici pour verrouiller le comportement du balayage rapide de collect.classer()."""
+    import re
+    t, r = collect.normaliser(titre), collect.normaliser(resume)
+    scores, premiere = {}, {}
+    for cat, mots in regles.items():
+        s, pos = 0, None
+        for mot in mots:
+            m = collect.normaliser(mot).strip()
+            if not m:
+                continue
+            fin = r"[a-z0-9]*(?= )" if mot.endswith("*") else r"(?= )"
+            rx = re.compile(r"(?<= )" + re.escape(m) + fin)
+            hits = [x.start() for x in rx.finditer(t)]
+            s += collect.POIDS_TITRE * len(hits) + collect.POIDS_RESUME * len(rx.findall(r))
+            if hits:
+                pos = min(hits) if pos is None else min(pos, min(hits))
+        if s:
+            scores[cat] = s
+            premiere[cat] = pos if pos is not None else 10**6
+    if not scores:
+        return None
+    return sorted(scores, key=lambda c: (-scores[c], premiere[c]))[0]
+
+
+CORPUS = [
+    ("Ukraine : nouvelles frappes de drones russes sur Kharkiv", "L'armée ukrainienne riposte"),
+    ("Union européenne : Bruxelles et le parlement européen", "européennes européen europe"),
+    ("Séisme de magnitude 6,8 au Japon, alerte au tsunami levée", ""),
+    ("Chine et Taïwan : manœuvres navales en mer de Chine", "Pékin militaire missile"),
+    ("L'OPEP relève sa production de pétrole", "baril prix énergie marché"),
+    ("", ""),
+    ("UE", "ue ue ue"),
+    ("Rien de géographique ici", "voiture vélo trottoir"),
+    ("ATTAQUE PUBLIQUE à l'assemblée", "une attaque publique"),
+    ("Mali Burkina Niger : retrait de la force", "Sahel opération armée française"),
+    ("Élection au Nigeria, à Lagos", "croissance économique africaine"),
+    ("Washington et Moscou : sanctions et diplomatie", "Kremlin Poutine Maison Blanche"),
+    ("Inondations au Pakistan après la mousson", "climat catastrophe naturelle"),
+    ("Lancement d'une fusée et mise en orbite d'un satellite", "espace technologie"),
+    ("union européenne union européenne", "union européenne"),
+]
+
+
+@pytest.mark.parametrize("titre, resume", CORPUS)
+@pytest.mark.parametrize("famille", ["zones", "themes"])
+def test_tri_rapide_equivaut_a_la_reference(famille, titre, resume):
+    tables = collect.compiler(REGLES[famille])
+    assert collect.classer(titre, resume, tables) == _classer_reference(titre, resume, REGLES[famille])
+
+
+def test_tri_rapide_equivaut_a_la_reference_sur_les_flux_de_test(tmp_path):
+    """Même vérification sur tous les articles des flux RSS et Atom enregistrés."""
+    articles = []
+    for fichier in ("flux_test_rss.xml", "flux_test_atom.xml"):
+        articles += collect.lire_rss((TESTS / fichier).read_bytes(), "test")
+    assert articles
+    for a in articles:
+        for famille in ("zones", "themes"):
+            tables = collect.compiler(REGLES[famille])
+            assert collect.classer(a["titre"], a["resume"], tables) == \
+                _classer_reference(a["titre"], a["resume"], REGLES[famille])
+
+
 # ---------- dates ----------
 @pytest.mark.parametrize("texte", [
     "Sun, 25 Oct 2026 08:00:00 +0100",   # RSS

@@ -86,35 +86,66 @@ def lire_date(txt):
 # ======================================================================
 # Tri par mots-clés
 # ======================================================================
+JETON = re.compile(r"[a-z0-9]+")
+
+
 def compiler(regles: dict) -> dict:
-    sortie = {}
+    """Prépare le tri. Les mots-clés sont rangés dans trois tables au lieu d'être compilés
+    en une expression régulière chacun : le texte est alors balayé une seule fois, quel que
+    soit le nombre de mots-clés (487 aujourd'hui, tous essayés sur chaque article avant).
+
+        exact     « bruxelles »        le jeton entier doit être égal au mot-clé
+        prefixe   « europeen* »        le jeton doit commencer par la racine
+        suite     « union europeenne » n jetons consécutifs
+
+    Les catégories sont gardées en liste, pas en ensemble : un mot-clé écrit deux fois dans
+    regles.json compte deux fois, exactement comme le faisaient deux expressions identiques.
+    """
+    exact, prefixe, suite, nmax = {}, {}, {}, 1
     for cat, mots in regles.items():
-        motifs = []
         for mot in mots:
             m = normaliser(mot).strip()
-            fin = r"[a-z0-9]*(?= )" if mot.endswith("*") else r"(?= )"
-            motifs.append(re.compile(r"(?<= )" + re.escape(m) + fin))
-        sortie[cat] = motifs
-    return sortie
+            if not m:
+                continue
+            if " " in m:
+                n = m.count(" ") + 1
+                nmax = max(nmax, n)
+                suite.setdefault((n, m), []).append(cat)
+            elif mot.endswith("*"):
+                prefixe.setdefault(m, []).append(cat)
+            else:
+                exact.setdefault(m, []).append(cat)
+    return {"exact": exact, "prefixe": prefixe, "suite": suite, "nmax": nmax,
+            "lmin": min((len(p) for p in prefixe), default=1),
+            "lmax": max((len(p) for p in prefixe), default=0)}
 
 
-def classer(titre: str, resume: str, motifs: dict):
+def _balayer(texte: str, tables: dict, poids: int, scores: dict, premiere: dict, noter: bool):
+    """Ajoute `poids` point(s) à chaque catégorie dont un mot-clé apparaît dans `texte`.
+    `noter` : ne retenir la position du premier mot-clé que pour le titre (départage les égalités)."""
+    jetons = [(m.group(), m.start()) for m in JETON.finditer(texte)]
+    exact, prefixe, suite = tables["exact"], tables["prefixe"], tables["suite"]
+    lmin, lmax, nmax = tables["lmin"], tables["lmax"], tables["nmax"]
+    for i, (jeton, pos) in enumerate(jetons):
+        trouves = list(exact.get(jeton, ()))
+        for k in range(lmin, min(lmax, len(jeton)) + 1):
+            trouves += prefixe.get(jeton[:k], ())
+        for n in range(2, min(nmax, len(jetons) - i) + 1):
+            trouves += suite.get((n, " ".join(j for j, _ in jetons[i:i + n])), ())
+        for cat in trouves:
+            scores[cat] = scores.get(cat, 0) + poids
+            if noter and pos < premiere.get(cat, 10**9):
+                premiere[cat] = pos
+
+
+def classer(titre: str, resume: str, tables: dict):
     """Catégorie qui a le plus de points (titre x3, résumé x1), ou None."""
-    t, r = normaliser(titre), normaliser(resume)
     scores, premiere = {}, {}
-    for cat, regexes in motifs.items():
-        s, pos = 0, None
-        for rx in regexes:
-            hits = [m.start() for m in rx.finditer(t)]
-            s += POIDS_TITRE * len(hits) + POIDS_RESUME * len(rx.findall(r))
-            if hits:
-                pos = min(hits) if pos is None else min(pos, min(hits))
-        if s:
-            scores[cat] = s
-            premiere[cat] = pos if pos is not None else 10**6
+    _balayer(normaliser(titre), tables, POIDS_TITRE, scores, premiere, True)
+    _balayer(normaliser(resume), tables, POIDS_RESUME, scores, premiere, False)
     if not scores:
         return None
-    return sorted(scores, key=lambda c: (-scores[c], premiere[c]))[0]
+    return sorted(scores, key=lambda c: (-scores[c], premiere.get(c, 10**6)))[0]
 
 
 # ======================================================================

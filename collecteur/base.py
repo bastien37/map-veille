@@ -35,7 +35,8 @@ THEMES = {
     "cli": "Climat et catastrophes naturelles",
 }
 
-VERSION_SCHEMA = 4   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes
+VERSION_SCHEMA = 5   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+                    # v5 : index couvrants idx_articles_zone et idx_articles_source
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -102,8 +103,6 @@ CREATE TABLE IF NOT EXISTS articles (
     maj         TEXT NOT NULL,                  -- dernière modification
     collecte_id INTEGER REFERENCES collectes(id)
 );
-CREATE INDEX IF NOT EXISTS idx_articles_date  ON articles(date_pub);
-CREATE INDEX IF NOT EXISTS idx_articles_titre ON articles(titre_norm);
 CREATE TABLE IF NOT EXISTS sources (
     id           INTEGER PRIMARY KEY,
     nom          TEXT NOT NULL UNIQUE,           -- nom affiché sous chaque article
@@ -116,6 +115,20 @@ CREATE TABLE IF NOT EXISTS sources (
     ajout        TEXT NOT NULL,
     maj          TEXT NOT NULL
 );
+"""
+
+# Index créés APRÈS les migrations de colonnes : idx_articles_zone s'appuie sur « masque »,
+# qu'une base v1 n'a pas encore quand le schéma est rejoué.
+INDEX = """
+CREATE INDEX IF NOT EXISTS idx_articles_date  ON articles(date_pub);
+CREATE INDEX IF NOT EXISTS idx_articles_titre ON articles(titre_norm);
+-- v5 : deux index « couvrants ». Ils portent toutes les colonnes lues par les comptages de
+-- l'API, qui n'a donc plus à ouvrir la table : à 200 000 articles, la synthèse par zone passe
+-- de 386 à 30 ms et par source de 371 à 22 ms (mesures : bancs/RAPPORT-phase1.md).
+-- Ne pas ajouter d'index (zone, theme, …) en plus : le planificateur le préfère à tort et
+-- le comptage filtré retombe de 2,9 à 8,5 ms.
+CREATE INDEX IF NOT EXISTS idx_articles_zone   ON articles(zone, masque, date_pub, theme, ajout);
+CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source, masque, date_pub, zone, theme);
 """
 
 VUES = """
@@ -162,6 +175,8 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
                            "CHECK (masque IN (0, 1))")
             if "nb_supprimes" not in {r["name"] for r in cx.execute("PRAGMA table_info(collectes)")}:
                 cx.execute("ALTER TABLE collectes ADD COLUMN nb_supprimes INTEGER NOT NULL DEFAULT 0")   # v4
+            for instruction in _instructions(INDEX):   # après les ALTER : les index les utilisent
+                cx.execute(instruction)
             for instruction in _instructions(VUES):
                 cx.execute(instruction)
             if not cx.execute("SELECT 1 FROM sources LIMIT 1").fetchone():   # migration vers v3
