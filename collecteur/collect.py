@@ -552,7 +552,7 @@ def main(argv=None):
                                   args.forcer)
 
     # 3. Tri et localisation, puis 4. stockage dans la base
-    compte = {"nouveau": 0, "maj": 0, "inchange": 0, "doublon": 0, "ancien": 0}
+    compte = {"nouveau": 0, "regroupe": 0, "maj": 0, "inchange": 0, "ancien": 0}
     gaz = lieux.charger_gazetteer()
     geocodeur = lieux.charger_geocodeur()
     situes = 0
@@ -563,15 +563,19 @@ def main(argv=None):
         situer(a, gaz, cx, geocodeur)
         situes += a.get("lat") is not None
         compte[base.enregistrer(cx, a, normaliser(a["titre"]), MAINTENANT, collecte)] += 1
-    base.fin_collecte(cx, collecte, base.maintenant_utc(), len(bruts), compte["nouveau"], compte["doublon"])
+    base.fin_collecte(cx, collecte, base.maintenant_utc(), len(bruts), compte["nouveau"],
+                      compte["regroupe"])
 
     publies = cx.execute("SELECT COUNT(*) FROM fil WHERE date_pub >= ?",
                          ((MAINTENANT - base.DUREE_FIL).isoformat(),)).fetchone()[0]
     a_trier = cx.execute("SELECT COUNT(*) FROM a_trier").fetchone()[0]
     total = cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+    evenements = cx.execute("SELECT COUNT(*) FROM evenements").fetchone()[0]
     cx.close()
-    print(f"{compte['nouveau']} nouveaux articles, {compte['doublon']} doublons écartés, "
-          f"{compte['ancien']} trop anciens ignorés.")
+    print(f"{compte['nouveau']} nouveaux événements, {compte['regroupe']} articles rattachés "
+          f"à un événement déjà connu, {compte['ancien']} trop anciens ignorés.")
+    print(f"Événements : {evenements} au total "
+          f"(un événement = un point sur la carte, avec toutes ses sources).")
     if bruts:
         print(f"Carte : {situes} articles sur {len(bruts)} placés "
               f"({100 * situes / len(bruts):.0f} %) ; les autres restent dans la liste.")

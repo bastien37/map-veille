@@ -114,24 +114,29 @@ def verifier(zone: Optional[str], theme: Optional[str]):
                                  f"Codes valides : {', '.join(base.THEMES_ACTIFS)}")
 
 
-def filtre_sql(zone, theme, jours):
+def filtre_sql(zone, theme, jours, prefixe: str = "", colonne_date: str = "date_pub"):
     """Clause WHERE commune : période (D05), zone et thème.
 
+    `prefixe` et `colonne_date` permettent d'appliquer le même filtre à la table des
+    articles (date_pub) comme à celle des événements (e.date_fin), sans récrire la règle
+    deux fois ni bricoler la chaîne SQL après coup.
+
     Le site ne montre que les thèmes actifs de config/themes.json. La liste est injectée
-    telle quelle (ce sont des codes validés à la lecture de la configuration, pas une saisie
-    d'utilisateur) : le planificateur garde ainsi son index, ce qu'une sous-requête
+    telle quelle — ce sont des codes validés à la lecture de la configuration, jamais une
+    saisie d'utilisateur — pour que le planificateur garde son index, ce qu'une sous-requête
     sur la table themes lui ferait perdre.
     """
     depuis = (maintenant() - timedelta(days=jours)).isoformat()
-    clauses, params = ["date_pub >= ?"], [depuis]
+    clauses, params = [f"{prefixe}{colonne_date} >= ?"], [depuis]
     if zone:
-        clauses.append("zone = ?")
+        clauses.append(f"{prefixe}zone = ?")
         params.append(zone)
     if theme:
-        clauses.append("theme = ?")
+        clauses.append(f"{prefixe}theme = ?")
         params.append(theme)
     else:
-        clauses.append("theme IN (%s)" % ", ".join("'%s'" % c for c in base.THEMES_ACTIFS))
+        clauses.append(f"{prefixe}theme IN (%s)"
+                       % ", ".join("'%s'" % c for c in base.THEMES_ACTIFS))
     return " AND ".join(clauses), params
 
 
@@ -195,18 +200,123 @@ def synthese(requete: Request, theme: Optional[str] = None, jours: int = Query(3
 def articles(requete: Request, zone: Optional[str] = None, theme: Optional[str] = None,
              jours: int = Query(30, ge=1, le=365),
              limite: int = Query(150, ge=1, le=500), decalage: int = Query(0, ge=0),
+             grouper: bool = Query(True, description="une ligne par événement plutôt que par article"),
              cx: sqlite3.Connection = Depends(connexion)):
+    """Le fil, du plus récent au plus ancien.
+
+    Par défaut une ligne par ÉVÉNEMENT : la même dépêche reprise par cinq médias n'encombre
+    pas la liste cinq fois, et `nb_sources` dit combien de médias la relaient. `grouper=false`
+    rend la liste article par article, comme avant le regroupement.
+    """
     verifier(zone, theme)
     where, params = filtre_sql(zone, theme, jours)
     seuil_nouveau = (maintenant() - base.DUREE_NOUVEAU).isoformat()
     total, nouveaux = cx.execute(f"SELECT COUNT(*), COALESCE(SUM(ajout >= ?), 0) FROM fil WHERE {where}",
                                  [seuil_nouveau, *params]).fetchone()
+    if not grouper:
+        lignes = cx.execute(
+            f"""SELECT id, titre, source, date_pub AS date, zone, theme, lien, evenement_id,
+                       ajout >= ? AS nouveau
+                FROM fil WHERE {where} ORDER BY date_pub DESC LIMIT ? OFFSET ?""",
+            [seuil_nouveau, *params, limite, decalage]).fetchall()
+        return avec_cache({"total": total, "nouveaux": nouveaux, "decalage": decalage,
+                           "groupe": False,
+                           "articles": [dict(r, nouveau=bool(r["nouveau"])) for r in lignes]},
+                          CACHE_FIL, requete)
+
+    # Vue groupée : on part de la table des événements, bien plus petite que celle des
+    # articles, puis on va chercher l'article le plus récent de chacun pour le titre, la
+    # source et le lien affichés. Une fenêtre glissante sur tous les articles donnerait le
+    # même résultat mais devrait tous les parcourir.
+    ou_evt, p_evt = filtre_sql(zone, theme, jours, "e.", "date_fin")
+    # EXISTS dans la clause WHERE, et pas un filtre après coup : un événement dont toutes
+    # les sources ont été masquées ne doit ni être compté dans le total, ni occuper une
+    # place dans la page — sinon la pagination renverrait des pages trop courtes.
+    ou_evt += " AND e.nb_sources > 0"
+    evts = cx.execute(
+        f"""SELECT e.id, e.lieu, e.lat, e.lon, e.zone, e.theme,
+                   e.nb_sources
+            FROM evenements e WHERE {ou_evt}
+            ORDER BY e.date_fin DESC LIMIT ? OFFSET ?""",
+        [*p_evt, limite, decalage]).fetchall()
+    sortie = []
+    for e in evts:
+        r = cx.execute(
+            """SELECT id, titre, source, date_pub AS date, lien, ajout >= ? AS nouveau
+               FROM fil WHERE evenement_id = ? ORDER BY date_pub DESC LIMIT 1""",
+            (seuil_nouveau, e["id"])).fetchone()
+        if r:
+            sortie.append({**dict(r), "nouveau": bool(r["nouveau"]), "evenement_id": e["id"],
+                           "nb_sources": e["nb_sources"], "lieu": e["lieu"],
+                           "lat": e["lat"], "lon": e["lon"],
+                           "zone": e["zone"], "theme": e["theme"]})
+    total_evt = cx.execute(f"SELECT COUNT(*) FROM evenements e WHERE {ou_evt}", p_evt).fetchone()[0]
+    return avec_cache({"total": total_evt, "total_articles": total, "nouveaux": nouveaux,
+                       "decalage": decalage, "groupe": True, "articles": sortie},
+                      CACHE_FIL, requete)
+
+
+def bbox_sql(bbox: Optional[str], prefixe: str = ""):
+    """Fenêtre de la carte, « ouest,sud,est,nord » en degrés. Une carte n'affiche que ce
+    qu'elle montre : charger la planète entière à chaque déplacement serait absurde.
+    `prefixe` est l'alias de table à mettre devant lat et lon (« e. » par exemple)."""
+    if not bbox:
+        return "", []
+    try:
+        ouest, sud, est, nord = (float(x) for x in bbox.split(","))
+    except (ValueError, TypeError):
+        raise HTTPException(422, "bbox attendue sous la forme « ouest,sud,est,nord » en degrés.")
+    if not (-90 <= sud <= nord <= 90) or not (-180 <= ouest <= 180 and -180 <= est <= 180):
+        raise HTTPException(422, "bbox hors des limites : latitudes -90..90, longitudes -180..180.")
+    lat, lon = f"{prefixe}lat", f"{prefixe}lon"
+    if ouest <= est:
+        return f" AND {lat} BETWEEN ? AND ? AND {lon} BETWEEN ? AND ?", [sud, nord, ouest, est]
+    # la fenêtre franchit l'antiméridien (Pacifique) : elle se lit en deux morceaux
+    return f" AND {lat} BETWEEN ? AND ? AND ({lon} >= ? OR {lon} <= ?)", [sud, nord, ouest, est]
+
+
+@app.get("/api/evenements", summary="Points de la carte : un événement = un point, plusieurs sources")
+def evenements(requete: Request, theme: Optional[str] = None, zone: Optional[str] = None,
+               jours: int = Query(30, ge=1, le=365), bbox: Optional[str] = None,
+               limite: int = Query(500, ge=1, le=2000),
+               cx: sqlite3.Connection = Depends(connexion)):
+    """Les événements d'une fenêtre géographique et d'une période.
+
+    Un événement regroupe les articles de plusieurs médias qui parlent de la même chose au
+    même endroit : il ne fait qu'un point sur la carte. Les plus suivis (le plus de sources)
+    sont renvoyés en premier, pour qu'un plafond de résultats ne coupe pas l'essentiel.
+    """
+    verifier(zone, theme)
+    where, params = filtre_sql(zone, theme, jours, "e.", "date_fin")
+    where += " AND e.lat IS NOT NULL"
+    sql_bbox, p_bbox = bbox_sql(bbox, "e.")
+    where += sql_bbox
+    params += p_bbox
+    # nb_sources est recalculé depuis la vue fil : un article masqué ou non classé ne doit
+    # pas gonfler le compteur affiché au lecteur
+    where += " AND e.nb_sources > 0"
     lignes = cx.execute(
-        f"""SELECT id, titre, source, date_pub AS date, zone, theme, lien, ajout >= ? AS nouveau
-            FROM fil WHERE {where} ORDER BY date_pub DESC LIMIT ? OFFSET ?""",
-        [seuil_nouveau, *params, limite, decalage]).fetchall()
-    return avec_cache({"total": total, "nouveaux": nouveaux, "decalage": decalage,
-                       "articles": [dict(r, nouveau=bool(r["nouveau"])) for r in lignes]},
+        f"""SELECT e.id, e.titre, e.lieu, e.lat, e.lon, e.zone, e.theme,
+                   e.date_debut, e.date_fin, e.nb_sources
+            FROM evenements e WHERE {where}
+            ORDER BY e.nb_sources DESC, e.date_fin DESC LIMIT ?""", [*params, limite]).fetchall()
+    points = [dict(r) for r in lignes]
+    return avec_cache({"total": len(points), "evenements": points}, CACHE_FIL, requete)
+
+
+@app.get("/api/evenements/{evenement_id}", summary="Un événement et toutes ses sources")
+def evenement(evenement_id: int, requete: Request, cx: sqlite3.Connection = Depends(connexion)):
+    e = cx.execute("SELECT * FROM evenements WHERE id = ?", (evenement_id,)).fetchone()
+    if not e:
+        raise HTTPException(404, f"Aucun événement n° {evenement_id}.")
+    seuil_nouveau = (maintenant() - base.DUREE_NOUVEAU).isoformat()
+    sources = [dict(r, nouveau=bool(r["nouveau"])) for r in cx.execute(
+        """SELECT id, titre, source, date_pub AS date, lien, ajout >= ? AS nouveau
+           FROM fil WHERE evenement_id = ? ORDER BY date_pub DESC""",
+        (seuil_nouveau, evenement_id))]
+    if not sources:
+        raise HTTPException(404, f"L'événement n° {evenement_id} n'a aucune source publiable.")
+    return avec_cache({**dict(e), "nb_sources": len(sources), "sources": sources},
                       CACHE_FIL, requete)
 
 

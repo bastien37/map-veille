@@ -84,10 +84,11 @@ THEMES = {t["code"]: t["nom"] for t in THEMES_DECLARES}
 THEMES_ACTIFS = [t["code"] for t in THEMES_DECLARES if t["actif"]]
 REGLES_THEMES = {t["code"]: t["mots_cles"] for t in THEMES_DECLARES}
 
-VERSION_SCHEMA = 8   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+VERSION_SCHEMA = 9   # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
                     # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs,
                     # pause_jusqu_a ; v7 : themes.actif/ordre, sources.langue/frequence/theme/
-                    # origine ; v8 : articles.lat/lon/lieu, table lieux_geocodes
+                    # origine ; v8 : articles.lat/lon/lieu, table lieux_geocodes ;
+                    # v9 : table evenements, articles.evenement_id
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -114,7 +115,7 @@ CREATE TABLE IF NOT EXISTS collectes (
     hors_ligne  INTEGER NOT NULL DEFAULT 0,
     nb_lus      INTEGER NOT NULL DEFAULT 0, -- éléments reçus des sources
     nb_nouveaux INTEGER NOT NULL DEFAULT 0, -- articles ajoutés à la base
-    nb_doublons INTEGER NOT NULL DEFAULT 0,
+    nb_doublons INTEGER NOT NULL DEFAULT 0, -- articles rattachés à un événement déjà connu
     nb_supprimes INTEGER NOT NULL DEFAULT 0 -- articles de plus de 30 jours supprimés (D05)
 );
 CREATE TABLE IF NOT EXISTS collectes_sources (
@@ -144,8 +145,31 @@ CREATE TABLE IF NOT EXISTS articles (
     lat           REAL,
     lon           REAL,
     lieu          TEXT,                         -- nom du lieu retenu, affiché au survol
-    lieu_origine  TEXT                          -- flux | gazetteer | nominatim | photon
+    lieu_origine  TEXT,                         -- flux | gazetteer | nominatim | photon
+    -- v9 : événement dont cet article est une des sources
+    evenement_id  INTEGER REFERENCES evenements(id) ON DELETE SET NULL
 );
+-- v9 : un événement regroupe les articles de plusieurs médias qui parlent de la même
+-- chose, au même endroit, à peu près au même moment. Un événement = UN point sur la carte,
+-- et un panneau qui liste ses sources.
+CREATE TABLE IF NOT EXISTS evenements (
+    id          INTEGER PRIMARY KEY,
+    titre       TEXT NOT NULL,       -- titre de l'article le plus ancien du groupe
+    titre_norm  TEXT NOT NULL,
+    lat         REAL,
+    lon         REAL,
+    lieu        TEXT,
+    zone        TEXT REFERENCES zones(code),
+    theme       TEXT REFERENCES themes(code),
+    date_debut  TEXT NOT NULL,       -- publication du plus ancien article
+    date_fin    TEXT NOT NULL,       -- publication du plus récent
+    -- nombre de sources PUBLIABLES (zone et thème connus, non masquées). Tenu à jour à
+    -- chaque écriture plutôt que recalculé à la lecture : un EXISTS par événement coûtait
+    -- 268 ms sur la vue mondiale (bancs/bench_carte.py).
+    nb_sources  INTEGER NOT NULL DEFAULT 0,
+    maj         TEXT NOT NULL
+);
+
 -- v8 : cache de géocodage. Les conditions d'usage de Nominatim l'imposent, et de toute
 -- façon un lieu ne doit jamais être demandé deux fois. Les échecs sont mémorisés aussi,
 -- sans quoi les mêmes introuvables repartiraient à chaque collecte.
@@ -200,6 +224,11 @@ CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source, masque, date_
 -- sur 200 000 articles : un index spatial dédié n'apporte rien à ce volume et dégrade même
 -- la vue mondiale (bancs/bench_bbox.py) ; celui-ci suffit.
 CREATE INDEX IF NOT EXISTS idx_articles_carte ON articles(masque, date_pub, lat, lon, theme);
+-- v9 : regroupement. idx_evenements_fin sert à chercher les candidats dans la fenêtre de
+-- temps ; idx_articles_evenement à lister les sources d'un événement.
+CREATE INDEX IF NOT EXISTS idx_evenements_fin       ON evenements(date_fin);
+CREATE INDEX IF NOT EXISTS idx_evenements_carte     ON evenements(theme, date_fin, lat, lon, nb_sources);
+CREATE INDEX IF NOT EXISTS idx_articles_evenement   ON articles(evenement_id);
 """
 
 VUES = """
@@ -258,7 +287,8 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
                 if nom not in colonnes_sources:
                     cx.execute(f"ALTER TABLE sources ADD COLUMN {nom} {definition}")
             for nom, definition in (("lat", "REAL"), ("lon", "REAL"),                  # v8
-                                    ("lieu", "TEXT"), ("lieu_origine", "TEXT")):
+                                    ("lieu", "TEXT"), ("lieu_origine", "TEXT"),
+                                    ("evenement_id", "INTEGER REFERENCES evenements(id)")):  # v9
                 if nom not in colonnes:
                     cx.execute(f"ALTER TABLE articles ADD COLUMN {nom} {definition}")
             for nom, definition in (("actif", "INTEGER NOT NULL DEFAULT 1"),           # v7
@@ -397,9 +427,14 @@ def fin_collecte(cx, collecte_id: int, fin: datetime, nb_lus: int, nb_nouveaux: 
 
 def purger(cx, maintenant: datetime, collecte_id: int = None) -> int:
     """D05 : supprime définitivement les articles publiés il y a plus de 30 jours
-    (y compris ceux classés à la main ou masqués). Renvoie le nombre d'articles supprimés."""
+    (y compris ceux classés à la main ou masqués). Renvoie le nombre d'articles supprimés.
+    Les événements qui n'ont plus aucune source disparaissent avec eux."""
     limite = (maintenant - DUREE_FIL).isoformat()
     n = cx.execute("DELETE FROM articles WHERE date_pub < ?", (limite,)).rowcount
+    cx.execute("DELETE FROM evenements WHERE id NOT IN "
+               "(SELECT evenement_id FROM articles WHERE evenement_id IS NOT NULL)")
+    cx.execute("""UPDATE evenements SET nb_sources =
+                    (SELECT COUNT(*) FROM articles WHERE evenement_id = evenements.id)""")
     if collecte_id is not None:
         cx.execute("UPDATE collectes SET nb_supprimes = ? WHERE id = ?", (n, collecte_id))
     cx.commit()
@@ -409,13 +444,136 @@ def purger(cx, maintenant: datetime, collecte_id: int = None) -> int:
 # ---------------------------------------------------------------------------
 # Enregistrement d'un article
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Regroupement des articles en événements
+# ---------------------------------------------------------------------------
+# Trois conditions, toutes nécessaires, pour que deux articles parlent du même événement.
+# Les seuils sont volontairement serrés : fusionner deux faits distincts est pire que de
+# les laisser côte à côte, car le lecteur ne voit alors plus qu'un seul point.
+RAYON_REGROUPEMENT_KM = 50          # deux lieux plus éloignés sont deux endroits différents
+FENETRE_REGROUPEMENT = timedelta(hours=48)   # au-delà, c'est une suite, pas la même dépêche
+
+# Deux seuils de ressemblance des titres, selon ce que le lieu dit déjà. Quand les deux
+# articles sont au même endroit, le lieu est un indice fort et le titre peut diverger
+# davantage : « Le sommet de l'UE s'ouvre à Bruxelles » et « Ouverture du sommet européen à
+# Bruxelles » n'ont que 29 % de mots communs. Sans lieu commun, on exige beaucoup plus,
+# sinon « séisme au Japon » et « séisme en Italie » finiraient sur le même point.
+# Chiffres mesurés sur tests/regroupement_annote.json.
+SEUIL_SIMILARITE = 0.45             # part de mots communs exigée sans lieu concordant
+SEUIL_SIMILARITE_LOCALISE = 0.28    # exigée quand les deux articles sont au même endroit
+
+# Mots trop fréquents dans les titres de presse pour dire quoi que ce soit de la ressemblance
+MOTS_VIDES = frozenset("""
+a au aux avec ce ces dans de des du elle en et eux il ils je la le les leur lui ma mais me
+meme mes moi mon ne nos notre nous on ou par pas pour qu que qui sa se ses son sur ta te tes
+toi ton tu un une vos votre vous y ont est sont etre avoir plus moins apres avant contre
+entre vers chez sans sous tres bien fait faire dit selon the of and in on for to from with
+at by as is are was were be been has have had its their this that
+""".split())
+
+
+def jetons_titre(titre_norm: str) -> frozenset:
+    """Mots porteurs de sens d'un titre déjà normalisé (voir collect.normaliser)."""
+    return frozenset(m for m in titre_norm.split() if len(m) > 2 and m not in MOTS_VIDES)
+
+
+def similarite(a: frozenset, b: frozenset) -> float:
+    """Indice de Jaccard : part de mots communs. 1 = mêmes mots, 0 = rien en commun."""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def distance_km(lat1, lon1, lat2, lon2) -> float:
+    """Distance à vol d'oiseau (formule de haversine), en kilomètres."""
+    from math import asin, cos, radians, sin, sqrt
+    lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
+    h = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
+    return 2 * 6371.0 * asin(sqrt(min(1.0, h)))
+
+
+def _candidats_evenements(cx, a: dict, titre_norm: str, date: datetime):
+    """Événements susceptibles de correspondre : même fenêtre de temps, et si l'article est
+    localisé, même voisinage. Le filtre géographique est une boîte carrée calculée en SQL ;
+    la vraie distance est vérifiée ensuite."""
+    debut = (date - FENETRE_REGROUPEMENT).isoformat()
+    fin = (date + FENETRE_REGROUPEMENT).isoformat()
+    clauses = ["date_fin >= ?", "date_debut <= ?"]
+    params = [debut, fin]
+    if a.get("lat") is not None:
+        marge = RAYON_REGROUPEMENT_KM / 111.0        # 1 degré de latitude ≈ 111 km
+        clauses += ["lat BETWEEN ? AND ?", "lon BETWEEN ? AND ?"]
+        params += [a["lat"] - marge, a["lat"] + marge,
+                   a["lon"] - marge * 3, a["lon"] + marge * 3]   # large en longitude
+    else:
+        clauses.append("lat IS NULL")
+    return cx.execute(f"SELECT * FROM evenements WHERE {' AND '.join(clauses)} "
+                      "ORDER BY date_fin DESC LIMIT 200", params).fetchall()
+
+
+def rattacher(cx, a: dict, titre_norm: str, date: datetime, maintenant: datetime) -> tuple:
+    """Rattache l'article à un événement existant, ou en crée un. Renvoie (id, nouveau ?).
+
+    Remplace l'ancien comportement, où un deuxième article de même titre était purement
+    et simplement jeté : ses sources étaient perdues. Désormais il rejoint l'événement et
+    apparaît dans le panneau des sources.
+    """
+    mots = jetons_titre(titre_norm)
+    meilleur, meilleur_score = None, 0.0
+    for e in _candidats_evenements(cx, a, titre_norm, date):
+        meme_lieu = False
+        if a.get("lat") is not None and e["lat"] is not None:
+            if distance_km(a["lat"], a["lon"], e["lat"], e["lon"]) > RAYON_REGROUPEMENT_KM:
+                continue
+            meme_lieu = True
+        seuil = SEUIL_SIMILARITE_LOCALISE if meme_lieu else SEUIL_SIMILARITE
+        score = 1.0 if e["titre_norm"] == titre_norm else similarite(mots, jetons_titre(e["titre_norm"]))
+        if score >= seuil and score > meilleur_score:
+            meilleur, meilleur_score = e, score
+    iso = date.isoformat()
+    if meilleur is not None:
+        cx.execute("""UPDATE evenements
+                      SET date_debut = MIN(date_debut, ?), date_fin = MAX(date_fin, ?),
+                          lat = COALESCE(lat, ?), lon = COALESCE(lon, ?), lieu = COALESCE(lieu, ?),
+                          zone = COALESCE(zone, ?), theme = COALESCE(theme, ?), maj = ?
+                      WHERE id = ?""",
+                   (iso, iso, a.get("lat"), a.get("lon"), a.get("lieu"), a.get("zone"),
+                    a.get("theme"), maintenant.isoformat(), meilleur["id"]))
+        return meilleur["id"], False
+    cur = cx.execute(
+        """INSERT INTO evenements (titre, titre_norm, lat, lon, lieu, zone, theme,
+                                   date_debut, date_fin, nb_sources, maj)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
+        (a["titre"], titre_norm, a.get("lat"), a.get("lon"), a.get("lieu"), a.get("zone"),
+         a.get("theme"), iso, iso, maintenant.isoformat()))
+    return cur.lastrowid, True
+
+
+def rafraichir_compteur(cx, evenement_id: int):
+    """Recompte les sources publiables d'un événement.
+
+    À appeler après toute écriture qui peut les changer : nouvel article, masquage,
+    classement manuel. Une écriture SQL directe, hors de ces chemins, laisserait le
+    compteur faux — c'est pourquoi purger(), lancée à chaque collecte, les recompte tous.
+    """
+    if evenement_id is None:
+        return
+    cx.execute("UPDATE evenements SET nb_sources = "
+               "(SELECT COUNT(*) FROM fil WHERE evenement_id = ?) WHERE id = ?",
+               (evenement_id, evenement_id))
+
+
 def enregistrer(cx, a: dict, titre_norm: str, maintenant: datetime, collecte_id: int) -> str:
     """
-    Enregistre un article trié. Renvoie 'nouveau', 'maj', 'inchange', 'doublon' ou 'ancien'.
-      - publié il y a plus de 30 jours : pas enregistré, il serait supprimé à la collecte suivante (D05) ;
+    Enregistre un article trié. Renvoie 'nouveau', 'regroupe', 'maj', 'inchange' ou 'ancien'.
+      - publié il y a plus de 30 jours : pas enregistré, il serait supprimé à la collecte
+        suivante (D05) ;
       - lien déjà connu : on garde la date d'ajout ; on ne complète le classement
         que s'il manquait, et jamais si l'article a été corrigé à la main ;
-      - titre déjà connu sous un autre lien (même dépêche reprise ailleurs) : doublon (D03).
+      - même dépêche reprise ailleurs (même lieu, titre proche, même fenêtre de temps) :
+        l'article est GARDÉ et rattaché au même événement, qui ne fait qu'un point sur la
+        carte. C'est le changement par rapport à l'ancien comportement, où ce deuxième
+        article était jeté et sa source perdue (D03).
     """
     if a["date"] and a["date"] < maintenant - DUREE_FIL:
         return "ancien"
@@ -431,17 +589,18 @@ def enregistrer(cx, a: dict, titre_norm: str, maintenant: datetime, collecte_id:
                    (zone, theme, maintenant.isoformat(), ligne["id"]))
         return "maj"
 
-    if cx.execute("SELECT 1 FROM articles WHERE titre_norm = ? LIMIT 1", (titre_norm,)).fetchone():
-        return "doublon"
-
+    date = a["date"] or maintenant
+    evenement_id, premier = rattacher(cx, a, titre_norm, date, maintenant)
     cx.execute(
         """INSERT INTO articles (lien, titre, titre_norm, source, date_pub, zone, theme,
-                                 ajout, maj, collecte_id, lat, lon, lieu, lieu_origine)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (a["lien"], a["titre"], titre_norm, a["source"], (a["date"] or maintenant).isoformat(),
+                                 ajout, maj, collecte_id, lat, lon, lieu, lieu_origine,
+                                 evenement_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (a["lien"], a["titre"], titre_norm, a["source"], date.isoformat(),
          a["zone"], a["theme"], maintenant.isoformat(), maintenant.isoformat(), collecte_id,
-         a.get("lat"), a.get("lon"), a.get("lieu"), a.get("lieu_origine")))
-    return "nouveau"
+         a.get("lat"), a.get("lon"), a.get("lieu"), a.get("lieu_origine"), evenement_id))
+    rafraichir_compteur(cx, evenement_id)
+    return "nouveau" if premier else "regroupe"
 
 
 def classer_a_la_main(cx, article_id: int, zone: str, theme: str, maintenant: datetime) -> bool:
@@ -450,14 +609,22 @@ def classer_a_la_main(cx, article_id: int, zone: str, theme: str, maintenant: da
         raise ValueError(f"zone ou thème inconnu : {zone} / {theme}")
     cur = cx.execute("UPDATE articles SET zone = ?, theme = ?, manuel = 1, maj = ? WHERE id = ?",
                      (zone, theme, maintenant.isoformat(), article_id))
+    _compteur_de_l_article(cx, article_id)   # l'article devient publiable : l'événement le sait
     cx.commit()
     return cur.rowcount == 1
+
+
+def _compteur_de_l_article(cx, article_id: int):
+    ligne = cx.execute("SELECT evenement_id FROM articles WHERE id = ?", (article_id,)).fetchone()
+    if ligne:
+        rafraichir_compteur(cx, ligne["evenement_id"])
 
 
 def masquer(cx, article_id: int, masque: bool, maintenant: datetime) -> bool:
     """Retire un article du site (ou l'y remet) sans le supprimer de la base."""
     cur = cx.execute("UPDATE articles SET masque = ?, maj = ? WHERE id = ?",
                      (int(masque), maintenant.isoformat(), article_id))
+    _compteur_de_l_article(cx, article_id)
     cx.commit()
     return cur.rowcount == 1
 

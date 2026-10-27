@@ -231,14 +231,28 @@ def test_migration_v3_vers_v4(tmp_path):
     assert base.a_jour(cx)
 
 
-def test_doublon_par_titre(tmp_path):
+def test_meme_depeche_reprise_ailleurs_est_regroupee(tmp_path):
+    """Changement de comportement : le deuxième article n'est plus jeté.
+
+    Avant, un titre déjà connu renvoyait « doublon » et l'article disparaissait, sa source
+    avec lui. Il est désormais conservé et rattaché au même événement : un seul point sur
+    la carte, mais les deux médias cités dans le panneau des sources.
+    """
     cx = base.ouvrir(tmp_path / "map.sqlite")
     now = base.maintenant_utc()
     a = collect.article("Mali : la junte annonce un nouveau gouvernement", "https://a.test/1", now, "A",
                         zone="afr", theme="dip")
     b = dict(a, lien="https://b.test/2", source="B")
     assert base.enregistrer(cx, a, collect.normaliser(a["titre"]), now, None) == "nouveau"
-    assert base.enregistrer(cx, b, collect.normaliser(b["titre"]), now, None) == "doublon"
+    assert base.enregistrer(cx, b, collect.normaliser(b["titre"]), now, None) == "regroupe"
+    assert cx.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 2
+    assert cx.execute("SELECT COUNT(*) FROM evenements").fetchone()[0] == 1
+    e = cx.execute("SELECT * FROM evenements").fetchone()
+    assert e["nb_sources"] == 2
+    sources = [r[0] for r in cx.execute(
+        "SELECT source FROM articles WHERE evenement_id = ? ORDER BY source", (e["id"],))]
+    assert sources == ["A", "B"]
+    cx.close()
 
 
 def test_correction_manuelle_conservee(tmp_path):

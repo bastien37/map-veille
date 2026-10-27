@@ -1,0 +1,75 @@
+{
+ "_commentaire": "Paires de manchettes annotées à la main pour régler et surveiller le regroupement. ensemble = true : les deux articles parlent du même événement et doivent faire un seul point sur la carte. ensemble = false : deux faits distincts, qui doivent rester séparés. Fusionner à tort est pire que séparer à tort : le lecteur ne voit alors plus qu'un point là où il se passe deux choses.",
+ "paires": [
+  {
+   "ensemble": true,
+   "a": "Séisme de magnitude 6,8 au large du Japon, alerte au tsunami",
+   "b": "Un puissant séisme de magnitude 6,8 secoue le Japon, alerte au tsunami levée"
+  },
+  {
+   "ensemble": true,
+   "a": "Ukraine : frappes de drones russes sur Kharkiv",
+   "b": "Kharkiv visée par de nouvelles frappes de drones russes"
+  },
+  {
+   "ensemble": true,
+   "a": "Le sommet de l'Union européenne s'ouvre à Bruxelles",
+   "b": "Ouverture du sommet européen à Bruxelles"
+  },
+  {
+   "ensemble": true,
+   "a": "Inondations meurtrières à Lagos, des milliers de déplacés",
+   "b": "Lagos : les inondations font des milliers de déplacés"
+  },
+  {
+   "ensemble": true,
+   "a": "Élection présidentielle au Nigeria : le scrutin démarre",
+   "b": "Nigeria : démarrage du scrutin présidentiel"
+  },
+  {
+   "ensemble": true,
+   "a": "Incendie dans un entrepôt de Saint-Pétersbourg",
+   "b": "Un vaste incendie ravage un entrepôt à Saint-Pétersbourg"
+  },
+  {
+   "ensemble": true,
+   "a": "La Banque centrale européenne relève ses taux",
+   "b": "La BCE relève de nouveau ses taux directeurs"
+  },
+  {
+   "ensemble": false,
+   "a": "Ukraine : frappes de drones russes sur Kharkiv",
+   "b": "Kharkiv : réouverture du métro après trois mois de travaux"
+  },
+  {
+   "ensemble": false,
+   "a": "Inondations meurtrières à Lagos",
+   "b": "Lagos inaugure une nouvelle ligne de train urbain"
+  },
+  {
+   "ensemble": false,
+   "a": "Bruxelles : sommet européen sur la défense",
+   "b": "Bruxelles : grève des transports publics lundi"
+  },
+  {
+   "ensemble": false,
+   "a": "Séisme de magnitude 6,8 au large du Japon",
+   "b": "Séisme de magnitude 5,2 ressenti dans le nord de l'Italie"
+  },
+  {
+   "ensemble": false,
+   "a": "Élection présidentielle au Nigeria : le scrutin démarre",
+   "b": "Élection présidentielle au Ghana : la campagne s'achève"
+  },
+  {
+   "ensemble": false,
+   "a": "Cyclone tropical sur les Philippines : évacuations massives",
+   "b": "Cyclone tropical au Mozambique : trois morts"
+  },
+  {
+   "ensemble": false,
+   "a": "Séisme au Japon : le bilan s'alourdit à 120 morts",
+   "b": "Japon : un an après le séisme, la reconstruction patine"
+  }
+ ]
+}
