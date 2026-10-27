@@ -23,7 +23,9 @@ def client(tmp_path, monkeypatch):
 def test_referentiel(client):
     r = client.get("/api/referentiel").json()
     assert [z["code"] for z in r["zones"]] == ["eur", "rus", "mena", "afr", "asi", "ame"]
-    assert all(z["d"].startswith("M") and len(z["etiquette"]) == 2 for z in r["zones"])
+    # la zone reste un attribut de classement, mais n'a plus de tracé : le SVG des six
+    # zones a été remplacé par la carte à points (87,6 Kio de moins à chaque visite)
+    assert all(set(z) == {"code", "nom"} for z in r["zones"])
     assert [t["code"] for t in r["themes"]] == ["def", "dip", "eco", "tec", "cli"]
 
 
@@ -68,12 +70,12 @@ def test_front_sans_donnees(client):
 
 # ---------- compression et cache HTTP ----------
 def test_reponses_compressees(client):
-    """Le référentiel pèse 87 Kio : il doit partir compressé."""
     nu = client.get("/api/referentiel", headers={"Accept-Encoding": "identity"})
     comprime = client.get("/api/referentiel", headers={"Accept-Encoding": "gzip"})
     assert comprime.headers["content-encoding"] == "gzip"
-    assert int(comprime.headers["content-length"]) < len(nu.content) / 2
+    assert int(comprime.headers["content-length"]) < len(nu.content)
     assert comprime.json() == nu.json()
+    assert "content-encoding" not in nu.headers
 
 
 def test_petites_reponses_non_compressees(client):
@@ -102,10 +104,10 @@ def test_304_si_le_navigateur_a_deja_la_version(client, route):
 
 
 def test_le_front_ne_demande_pas_deux_fois_les_donnees(client):
-    """Le rappel des polices recalculait la géométrie en redemandant tout à l'API."""
+    """Le rappel des polices redemandait tout à l'API pour recalculer la largeur des
+    étiquettes du SVG. Le SVG est parti, le rappel aussi."""
     page = client.get("/").text
-    assert "document.fonts.ready.then(placerEtiquettes)" in page
-    assert "fonts.ready.then(actualiser)" not in page
+    assert "fonts.ready" not in page
     assert 'cache:"no-store"' not in page
 
 
@@ -119,7 +121,21 @@ def test_les_polices_ne_bloquent_pas_le_rendu(client):
 def test_la_carte_est_la_vue_par_defaut(client):
     page = client.get("/").text
     assert 'data-vue="points" aria-pressed="true"' in page
-    assert 'data-vue="zones"' in page and 'data-vue="liste"' in page
+    assert 'data-vue="liste"' in page
+
+
+def test_la_carte_des_zones_a_disparu_du_site(client):
+    """Décision validée : la carte à points remplace le SVG des six zones. La zone reste
+    en base et dans l'administration, mais ne s'affiche plus et ne filtre plus le site."""
+    page = client.get("/").text
+    for parti in ('data-vue="zones"', "<svg", "zonelist", "placerEtiquettes", "dessinerCarte",
+                  "fZone", "heat1"):
+        assert parti not in page, parti
+    assert not (RACINE / "donnees" / "carte.json").exists()
+    # mais la zone est toujours là où elle sert
+    assert len(client.get("/api/referentiel").json()["zones"]) == 6
+    assert client.get("/api/articles", params={"zone": "eur"}).status_code == 200
+    assert client.get("/api/synthese").json()["zones"]["eur"] is not None
 
 
 def test_leaflet_est_servi_par_le_site_pas_par_un_cdn(client):

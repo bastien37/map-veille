@@ -30,7 +30,6 @@ sys.path.insert(0, str(RACINE / "collecteur"))
 import base # noqa: E402  (schéma et référentiels partagés avec le collecteur)
 
 BASE = Path(os.environ.get("MAP_BASE", base.BASE))
-CARTE = RACINE / "donnees" / "carte.json"
 SITE = RACINE / "site"
 
 # Durées de cache côté navigateur. Le référentiel (zones, thèmes, tracé de la carte) ne change
@@ -143,9 +142,8 @@ def filtre_sql(zone, theme, jours, prefixe: str = "", colonne_date: str = "date_
 # ---------------------------------------------------------------------------
 # Routes de l'API
 # ---------------------------------------------------------------------------
-# Le référentiel (zones, thèmes, tracé SVG) ne bouge qu'avec le code : il est construit,
-# sérialisé ET compressé une seule fois. Le relire et le recompresser à chaque appel coûtait
-# 7 ms par requête pour un contenu rigoureusement identique.
+# Le référentiel (zones, thèmes, réglages de la carte) ne bouge qu'avec la configuration :
+# il est construit, sérialisé et compressé une seule fois.
 _referentiel = None      # (corps JSON, corps gzip, ETag)
 _carte_datee = None
 
@@ -153,11 +151,10 @@ _carte_datee = None
 @app.get("/api/referentiel", summary="Zones (avec leur tracé sur la carte) et thèmes")
 def referentiel(requete: Request, cx: sqlite3.Connection = Depends(connexion)):
     global _referentiel, _carte_datee
-    datee = (CARTE.stat().st_mtime_ns, base.CARTE_JSON.stat().st_mtime_ns)
+    datee = base.CARTE_JSON.stat().st_mtime_ns
     if _referentiel is None or datee != _carte_datee:   # fichier modifié : on reconstruit
         _carte_datee = datee
-        carte = json.loads(CARTE.read_text(encoding="utf-8"))["zones"]
-        zones = [{"code": r["code"], "nom": r["nom"], **carte.get(r["code"], {})}
+        zones = [{"code": r["code"], "nom": r["nom"]}
                  for r in cx.execute("SELECT code, nom FROM zones")]
         ordre = list(base.ZONES)
         zones.sort(key=lambda z: ordre.index(z["code"]) if z["code"] in ordre else 99)
