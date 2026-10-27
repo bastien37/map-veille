@@ -6,3 +6,9 @@ __pycache__/
 donnees/*.sqlite
 donnees/*.sqlite-*
 *.log
+
+# Bases produites par les bancs de mesure
+bancs/*.sqlite
+bancs/*.sqlite-*
+bancs/go/bench
+bancs/__pycache__/
