@@ -418,9 +418,35 @@ def article(titre, lien, date, source, resume="", zone=None, theme=None, indice_
 # ======================================================================
 # Connecteurs
 # ======================================================================
+# Marqueurs du début d'un document de flux. On ne cherche que dans les premiers octets :
+# au-delà, ce n'est plus du bruit en tête, c'est un autre document.
+DEBUTS_FLUX = (b"<?xml", b"<rss", b"<feed", b"<rdf:RDF")
+BRUIT_MAX = 4096
+
+
+def retirer_le_bruit_en_tete(contenu: bytes) -> bytes:
+    """Coupe ce qui précède le début du document XML, quand il y a quelque chose devant.
+
+    Des sites mal configurés font précéder leur flux d'un avertissement PHP ou d'une ligne
+    blanche. Le document devient « not well-formed » et feedparser ne rend plus aucune
+    entrée, alors que le flux lui-même est parfaitement lisible deux lignes plus bas.
+    Couper au premier marqueur ne devine rien : on jette du texte qui n'avait rien à faire
+    là. Vu en vrai sur East Pendulum, dont le flux commence par un « Warning: » de PHP.
+    """
+    trouves = [i for i in (contenu.find(m, 0, BRUIT_MAX) for m in DEBUTS_FLUX) if i >= 0]
+    if not trouves or min(trouves) == 0:
+        return contenu      # rien devant : le document commence déjà comme il faut
+    return contenu[min(trouves):]
+
+
 def lire_rss(contenu: bytes, nom: str):
     """Flux RSS 0.9x/1.0/2.0 ou Atom, lu par feedparser (tolère les flux mal formés)."""
     flux = feedparser.parse(contenu)
+    if flux.bozo and not flux.entries:
+        # deuxième chance : le flux est peut-être bon, précédé de bruit
+        propre = retirer_le_bruit_en_tete(contenu)
+        if propre is not contenu and len(propre) != len(contenu):
+            flux = feedparser.parse(propre)
     if flux.bozo and not flux.entries:
         raise ValueError(f"flux illisible ({flux.bozo_exception})")
     sortie = []

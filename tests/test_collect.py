@@ -301,3 +301,37 @@ def test_gdacs_reponse_vide(monkeypatch):
 def test_reponse_non_json_lisible():
     with pytest.raises(ValueError, match="non JSON"):
         collect.lire_json(b"<html>Erreur</html>")
+
+
+# ---------- bruit en tête d'un flux ----------
+FLUX_PROPRE = (b'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>'
+               b'<title>T</title><item><title>Un titre</title>'
+               b'<link>https://exemple.test/a</link></item></channel></rss>')
+
+
+def test_un_avertissement_php_devant_le_flux_est_retire():
+    """Vu en vrai : des sites font précéder leur XML d'un « Warning: » de PHP."""
+    sale = b"<br />\n<b>Warning</b>: quelque chose<br />\n" + FLUX_PROPRE
+    assert collect.retirer_le_bruit_en_tete(sale) == FLUX_PROPRE
+    lot = collect.lire_rss(sale, "essai")
+    assert [a["titre"] for a in lot] == ["Un titre"]
+
+
+def test_un_flux_propre_n_est_pas_touche():
+    assert collect.retirer_le_bruit_en_tete(FLUX_PROPRE) == FLUX_PROPRE
+    atom = b'<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+    assert collect.retirer_le_bruit_en_tete(atom) == atom
+
+
+def test_le_bruit_n_est_cherche_qu_en_tete():
+    """Au-delà de quelques kilo-octets, ce n'est plus du bruit : c'est un autre document."""
+    loin = b"x" * (collect.BRUIT_MAX + 100) + FLUX_PROPRE
+    assert collect.retirer_le_bruit_en_tete(loin) == loin
+
+
+def test_une_page_sans_le_moindre_xml_reste_une_erreur():
+    """East Pendulum ne sert QUE des avertissements : il n'y a rien à sauver."""
+    que_du_bruit = b"<br />\n<b>Warning</b>: tout est cass\xc3\xa9<br />\n" * 5
+    assert collect.retirer_le_bruit_en_tete(que_du_bruit) == que_du_bruit
+    with pytest.raises(ValueError, match="illisible"):
+        collect.lire_rss(que_du_bruit, "essai")
