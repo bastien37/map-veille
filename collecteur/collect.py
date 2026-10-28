@@ -43,6 +43,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
 from pathlib import Path
 
 import feedparser
@@ -452,6 +453,140 @@ def source_reliefweb(s, hors_ligne, pays_zone):
 # ======================================================================
 # Programme principal
 # ======================================================================
+# ======================================================================
+# Trouver l'adresse d'un flux
+# ======================================================================
+# Une adresse de flux se devine mal : chaque site a sa convention, et un moteur de recherche
+# ne les indexe pas. Plutôt que de laisser l'utilisateur essayer à la main, on demande au
+# site lui-même. Deux pistes, dans cet ordre :
+#   1. l'annonce officielle — <link rel="alternate" type="application/rss+xml"> dans le
+#      <head> de la page d'accueil. C'est la méthode prévue par la norme, et elle donne
+#      l'adresse exacte quand le site la respecte ;
+#   2. les chemins conventionnels, essayés seulement si l'annonce ne donne rien.
+CHEMINS_FLUX = ("/feed/", "/rss", "/rss.xml", "/feed.xml", "/index.xml", "/atom.xml",
+                "/feeds/all.atom.xml", "/?feed=rss2", "/blog/feed/", "/actualites/feed/",
+                "/news/feed/", "/publications/feed/")
+
+TYPES_FLUX = ("application/rss+xml", "application/atom+xml", "application/xml", "text/xml",
+              "application/json")   # JSON Feed : annoncé, mais feedparser ne le lit pas
+
+
+class _AnnoncesFlux(HTMLParser):
+    """Relève les <link rel="alternate" type="application/rss+xml" href="…"> d'une page."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.trouves = []
+
+    def handle_starttag(self, balise, attributs):
+        if balise != "link":
+            return
+        a = {c.lower(): (v or "") for c, v in attributs}
+        rel = a.get("rel", "").lower().split()
+        if "alternate" in rel and a.get("type", "").lower().split(";")[0].strip() in TYPES_FLUX:
+            if a.get("href"):
+                self.trouves.append((a["href"], a.get("title", "")))
+
+
+def flux_annonces(page: bytes, url_page: str) -> list:
+    """Adresses de flux annoncées par une page HTML, rendues absolues et dédoublonnées."""
+    lecteur = _AnnoncesFlux()
+    try:
+        lecteur.feed(page.decode("utf-8", "replace"))
+    except Exception:
+        return []   # une page cassée ne doit pas faire échouer la découverte
+    vues, sortie = set(), []
+    for href, _titre in lecteur.trouves:
+        absolue = urllib.parse.urljoin(url_page, href.strip())
+        if absolue.split(":")[0].lower() in ("http", "https") and absolue not in vues:
+            vues.add(absolue)
+            sortie.append(absolue)
+    return sortie
+
+
+def pages_a_sonder(url: str) -> list:
+    """Pages HTML où chercher une annonce : la racine du site, puis le dossier de l'adresse.
+
+    Beaucoup d'adresses fausses sont fausses « de peu » : https://site.org/fr/rss.xml quand
+    le flux est sur https://site.org/fr/feed/. Sonder le dossier en plus de la racine
+    rattrape les sites multilingues, qui annoncent un flux différent par langue.
+    """
+    d = urllib.parse.urlsplit(url)
+    racine = urllib.parse.urlunsplit((d.scheme, d.netloc, "/", "", ""))
+    pages = [racine]
+    dossier = d.path.rsplit("/", 1)[0] + "/"
+    if dossier not in ("/", ""):
+        pages.append(urllib.parse.urlunsplit((d.scheme, d.netloc, dossier, "", "")))
+    return pages
+
+
+def chemins_candidats(url: str) -> list:
+    """Adresses conventionnelles à essayer, à la racine du site puis sous son premier dossier."""
+    d = urllib.parse.urlsplit(url)
+    prefixes = [""]
+    premier = d.path.strip("/").split("/")[0] if d.path.strip("/") else ""
+    if premier and "." not in premier:      # /fr, /en, /blog… mais pas /rss.xml
+        prefixes.append("/" + premier)
+    vues, sortie = {url}, []
+    for prefixe in prefixes:
+        for chemin in CHEMINS_FLUX:
+            candidate = urllib.parse.urlunsplit((d.scheme, d.netloc, prefixe + chemin, "", ""))
+            if "?" in chemin:               # /?feed=rss2 : la query ne passe pas par le path
+                chemin_nu, _, requete = chemin.partition("?")
+                candidate = urllib.parse.urlunsplit(
+                    (d.scheme, d.netloc, prefixe + chemin_nu, requete, ""))
+            if candidate not in vues:
+                vues.add(candidate)
+                sortie.append(candidate)
+    return sortie
+
+
+def essayer_flux(url: str, lire=None) -> int:
+    """Nombre d'articles exploitables à cette adresse, ou -1 si ce n'en est pas un."""
+    lire = lire or (lambda u: http(u, accept="application/rss+xml, application/xml, text/xml, */*"))
+    try:
+        lot = lire_rss(lire(url), "essai")
+    except Exception:
+        return -1
+    return sum(1 for a in lot if a["titre"] and a["lien"].startswith("http"))
+
+
+def decouvrir_flux(url: str, lire=None, journal=None) -> dict:
+    """Cherche l'adresse du flux d'un site à partir d'une adresse qui ne répond pas.
+
+    Renvoie {"url", "articles", "annonce"} pour la première adresse qui rend des articles,
+    ou None. `journal` reçoit chaque essai (adresse, résultat) pour l'affichage.
+    """
+    # un seul Accept pour les deux usages : la page d'accueil et les flux candidats. Le
+    # serveur choisit de toute façon d'après l'adresse demandée.
+    lire = lire or (lambda u: http(u, accept="text/html, application/xhtml+xml, "
+                                             "application/rss+xml, application/atom+xml, "
+                                             "application/xml;q=0.9, */*;q=0.8"))
+    # Si le nom de machine n'existe pas, aucune des vingt-six adresses candidates n'existera
+    # non plus : autant le dire tout de suite plutôt que de les essayer une par une.
+    try:
+        verifier_url(url)
+    except AdresseRefusee as e:
+        if journal is not None:
+            journal.append((url, str(e)))
+        return None
+    annoncees = []
+    for page in pages_a_sonder(url):
+        try:
+            annoncees += [u for u in flux_annonces(lire(page), page) if u not in annoncees]
+        except Exception as e:
+            if journal is not None:
+                journal.append((page, f"page illisible ({type(e).__name__})"))
+    annoncees = [u for u in annoncees if u != url]
+    for candidate in annoncees + [c for c in chemins_candidats(url) if c not in annoncees]:
+        n = essayer_flux(candidate, lire)
+        if journal is not None:
+            journal.append((candidate, f"{n} articles" if n >= 0 else "pas un flux"))
+        if n > 0:
+            return {"url": candidate, "articles": n, "annonce": candidate in annoncees}
+    return None
+
+
 def referentiels() -> dict:
     """Règles de tri et correspondances pays -> zone, chargées une fois par collecte.
     Les mots-clés des thèmes viennent de config/themes.json ; ceux des zones de regles.json."""

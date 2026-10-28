@@ -5,6 +5,8 @@ MAP – Outil d'administration de la base SQLite.
     uv run collecteur/admin.py stats                     # chiffres clés et dernières collectes
     uv run collecteur/admin.py config                    # thèmes et sources issus de config/
     uv run collecteur/admin.py verifier-flux             # quelles sources répondent vraiment
+    uv run collecteur/admin.py verifier-flux --decouvrir # et cherche l'adresse de celles qui échouent
+    uv run collecteur/admin.py ia                        # ce que le modèle de langage a classé
     uv run collecteur/admin.py a-trier                   # articles que le tri n'a pas su classer
     uv run collecteur/admin.py classer 42 asi def        # classe l'article 42 à la main
     uv run collecteur/admin.py chercher "Taïwan"         # recherche dans les titres
@@ -13,6 +15,7 @@ Zones  : eur rus mena afr asi ame
 Thèmes : voir config/themes.json (« admin.py config » les affiche)
 """
 import argparse
+import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -90,11 +93,50 @@ def cmd_config(cx, args):
               f"\n    {', '.join(a_la_main)}")
 
 
+def _note_verifiee(ancienne: str, n: int, quand: str) -> str:
+    """Remplace l'avertissement « adresse non vérifiée » par le constat de la vérification.
+
+    Le reste de la note — ce qu'est la source, à quoi elle sert — est gardé : seule la
+    phrase d'avertissement, qui n'a plus lieu d'être, disparaît.
+    """
+    gardees = [phrase.strip() for phrase in (ancienne or "").split(". ")
+               if phrase.strip() and "VÉRIFIÉE" not in phrase and "confirmer" not in phrase
+               and "verifier-flux" not in phrase and "réseau sortant" not in phrase]
+    constat = f"Adresse vérifiée le {quand} : {n} articles lus"
+    return ". ".join([*gardees, constat]) + "."
+
+
+def _ecrire_flux(modifs: dict, quand: str) -> int:
+    """Reporte dans config/flux.json les adresses trouvées et les vérifications réussies.
+
+    modifs : nom de source -> {"url": …} et/ou {"articles": n}. Le fichier est réécrit
+    entièrement, commentaire de tête compris ; les sources absentes de `modifs` ne bougent pas.
+    """
+    contenu = json.loads(base.FLUX_JSON.read_text(encoding="utf-8"))
+    touches = 0
+    for f in contenu.get("flux", []):
+        m = modifs.get(f.get("nom"))
+        if not m:
+            continue
+        if m.get("url"):
+            f["url"] = m["url"]
+        if m.get("articles") is not None:
+            f["notes"] = _note_verifiee(f.get("notes", ""), m["articles"], quand)
+        touches += 1
+    base.FLUX_JSON.write_text(json.dumps(contenu, ensure_ascii=False, indent=2) + "\n",
+                              encoding="utf-8")
+    return touches
+
+
 def cmd_verifier_flux(cx, args):
     """Interroge chaque source sans rien enregistrer, et dit laquelle répond.
 
     À lancer après avoir ajouté des flux dans config/flux.json : une adresse se devine mal,
     et une source muette ne se remarque autrement qu'au bout de quelques collectes.
+
+    --decouvrir va plus loin : pour chaque source qui échoue, il demande au site lui-même
+    où est son flux (annonce <link rel="alternate"> de la page d'accueil), puis essaie les
+    chemins conventionnels. --ecrire reporte le résultat dans config/flux.json.
     """
     import collect
     sources = [s for s in base.lister_sources(cx) if args.toutes or s["actif"]]
@@ -118,7 +160,7 @@ def cmd_verifier_flux(cx, args):
             return s, None, f"{type(e).__name__}: {e}", time.perf_counter() - debut
         return s, lot, None, time.perf_counter() - debut
 
-    bons, muets, casses = [], [], []
+    bons, muets, casses, modifs = [], [], [], {}
     with ThreadPoolExecutor(max_workers=min(8, len(sources))) as pool:
         for s, lot, erreur, duree in pool.map(essayer, sources):
             if erreur:
@@ -134,18 +176,122 @@ def cmd_verifier_flux(cx, args):
                       f"répond en {duree:.1f} s mais ne donne aucun article exploitable")
             else:
                 bons.append(s)
+                modifs[s["nom"]] = {"articles": len(utiles)}
                 print(f"  {'ok':6}{s['nom'][:33]:34}{s['langue']:4}{len(utiles):>9}  "
                       f"{duree:.1f} s, plus récent le {recent}")
 
     print(f"\n{len(bons)} sources répondent, {len(muets)} vides, {len(casses)} en erreur.")
-    if casses or muets:
+    a_revoir = [s for s, _ in casses] + muets
+    trouves = _decouvrir(a_revoir, modifs) if args.decouvrir and a_revoir else []
+
+    if args.ecrire:
+        if not modifs:
+            print("\nRien à écrire dans config/flux.json.")
+        else:
+            n = _ecrire_flux(modifs, base.maintenant_utc().strftime("%d/%m/%Y"))
+            print(f"\nconfig/flux.json : {n} sources mises à jour "
+                  f"({len(trouves)} adresses corrigées). Relancer une collecte pour l'appliquer.")
+            a_la_main = [s["nom"] for s in a_revoir
+                         if s["origine"] == "admin" and s["nom"] in modifs]
+            if a_la_main:
+                print("  Attention : ces sources ont été reprises en main depuis "
+                      f"l'administration, le fichier ne s'y applique plus : {', '.join(a_la_main)}")
+    elif a_revoir:
         print("\nPour chacune : corriger l'adresse dans config/flux.json, ou la désactiver")
         print("depuis l'administration (onglet Sources), ou la retirer du fichier — une")
         print("source retirée est désactivée, ses articles déjà collectés restent.")
-        for s, _ in casses:
-            print(f"  à revoir : {s['nom']} — {s['url']}")
-        for s in muets:
-            print(f"  à revoir : {s['nom']} — {s['url']}")
+        if not args.decouvrir:
+            print("Ou laisser la commande chercher l'adresse : --decouvrir, puis --ecrire.")
+        for s in a_revoir:
+            if s["nom"] not in modifs:
+                print(f"  à revoir : {s['nom']} — {s['url']}")
+
+
+def _decouvrir(sources, modifs: dict) -> list:
+    """Cherche une adresse de flux pour chaque source qui a échoué. Renseigne `modifs`."""
+    import collect
+    # seules les sources RSS ont une adresse à découvrir : GDACS et ReliefWeb sont des API
+    # dont l'adresse est construite par le code, pas lue dans la configuration.
+    sources = [s for s in sources if s["type"] == "rss" and s["url"]]
+    if not sources:
+        print("\nAucune source RSS à chercher (les API n'ont pas d'adresse configurable).")
+        return []
+    print(f"\nRecherche d'une adresse pour {len(sources)} sources…")
+
+    def chercher(s):
+        journal = []
+        try:
+            return s, collect.decouvrir_flux(s["url"], journal=journal), journal, None
+        except Exception as e:
+            return s, None, journal, e
+
+    trouves = []
+    # quatre à la fois : la découverte interroge plusieurs fois le même site, et le verrou
+    # par domaine de collect.http() y sérialise déjà les requêtes
+    with ThreadPoolExecutor(max_workers=min(4, len(sources))) as pool:
+        for s, trouve, journal, erreur in pool.map(chercher, sources):
+            if trouve:
+                trouves.append((s, trouve))
+                modifs.setdefault(s["nom"], {}).update(url=trouve["url"],
+                                                       articles=trouve["articles"])
+                via = "annoncée par le site" if trouve["annonce"] else "chemin conventionnel"
+                print(f"  TROUVÉ  {s['nom']}\n            {trouve['url']}"
+                      f"\n            {trouve['articles']} articles, {via}")
+            else:
+                detail = f" ({type(erreur).__name__})" if erreur else ""
+                print(f"  rien    {s['nom']} — {len(journal)} adresses essayées{detail}")
+    print(f"\n{len(trouves)} adresses trouvées sur {len(sources)}.")
+    if trouves:
+        print("Relancer avec --ecrire pour les reporter dans config/flux.json.")
+    return trouves
+
+
+def cmd_ia(cx, args):
+    """État du classement par modèle de langage : configuration, cache, et ce qu'il a changé."""
+    import ia
+    try:
+        classificateur = ia.charger_classificateur()
+    except ValueError as e:
+        print(f"config/ia.json : {e}\n")
+        classificateur = None
+    if classificateur:
+        print(f"Actif — {classificateur.modele} sur {classificateur.url}")
+        print(f"  déclenché « {ia.quand_demander()} », au plus "
+              f"{classificateur.budget} appels par collecte, "
+              f"{60 / classificateur.intervalle:.0f} par minute\n")
+    else:
+        print("Inactif : les mots-clés de config/themes.json classent seuls.")
+        print("Pour l'activer, voir le commentaire en tête de config/ia.json.\n")
+
+    total, sans = cx.execute(
+        "SELECT COUNT(*), COALESCE(SUM(theme IS NULL), 0) FROM themes_ia").fetchone()
+    if not total:
+        print("Aucune question posée pour l'instant (la table themes_ia est vide).")
+        return
+    print(f"Cache : {total} titres soumis, dont {sans} que le modèle n'a pas su classer.")
+    print("Un titre déjà soumis n'est jamais resoumis, même après redémarrage.\n")
+
+    print("Thèmes attribués par le modèle (articles encore en base) :")
+    lignes = cx.execute("SELECT theme, COUNT(*) n FROM articles WHERE theme_ia = 1 "
+                        "GROUP BY theme ORDER BY n DESC").fetchall()
+    if not lignes:
+        print("  aucun — le modèle n'a rien corrigé, ou ces articles ont été purgés.")
+    for r in lignes:
+        print(f"  {r['n']:>5}  {base.THEMES.get(r['theme'], r['theme'] or '?')}")
+
+    print(f"\n{args.limite} derniers articles classés par le modèle :")
+    recents = cx.execute("SELECT * FROM articles WHERE theme_ia = 1 "
+                         "ORDER BY ajout DESC LIMIT ?", (args.limite,)).fetchall()
+    if recents:
+        print(f"{'id':>6}  {'date':10}  thè  {'source':22}  titre")
+        for r in recents:
+            print(f"{r['id']:>6}  {r['date_pub'][:10]}  {r['theme'] or '?':>3}  "
+                  f"{r['source'][:22]:22}  {r['titre'][:70]}")
+        print("\nUn classement qui vous paraît faux se corrige à la main :")
+        print("  uv run collecteur/admin.py classer <id> <zone> <thème>")
+        print("Un article classé à la main n'est plus jamais modifié, ni par le tri ni par l'IA.")
+    else:
+        print("  aucun.")
 
 
 def cmd_chercher(cx, args):
@@ -181,6 +327,12 @@ def main(argv=None):
                         help="interroge chaque source et dit laquelle répond (rien n'est enregistré)")
     p.add_argument("--toutes", action="store_true", help="y compris les sources désactivées")
     p.add_argument("--nom", help="ne vérifier que les sources dont le nom contient ce texte")
+    p.add_argument("--decouvrir", action="store_true",
+                   help="pour les sources qui échouent, demander au site où est son flux")
+    p.add_argument("--ecrire", action="store_true",
+                   help="reporter les adresses trouvées et les vérifications dans config/flux.json")
+    p = sous.add_parser("ia", help="état du classement par modèle de langage")
+    p.add_argument("--limite", type=int, default=15)
     p = sous.add_parser("a-trier", help="articles non classés")
     p.add_argument("--limite", type=int, default=50)
     p = sous.add_parser("chercher", help="recherche dans les titres")
@@ -194,7 +346,7 @@ def main(argv=None):
 
     cx = base.ouvrir(args.base)
     {"stats": cmd_stats, "config": cmd_config, "verifier-flux": cmd_verifier_flux,
-     "a-trier": cmd_a_trier, "chercher": cmd_chercher,
+     "ia": cmd_ia, "a-trier": cmd_a_trier, "chercher": cmd_chercher,
      "classer": cmd_classer}[args.commande](cx, args)
     cx.close()
 

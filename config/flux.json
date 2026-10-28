@@ -1,5 +1,5 @@
 {
-  "_commentaire": "Sources de la veille. Ce fichier est le catalogue déclaré : à chaque collecte il est appliqué à la base (création des nouvelles sources, mise à jour de l'adresse, du thème imposé, de la langue et de la fréquence). L'interrupteur « actif » n'est posé qu'à la création : ensuite c'est l'administration qui décide quelles sources tournent. Une source retirée d'ici est désactivée, jamais supprimée : ses articles restent. Les sources ajoutées depuis l'administration ne sont pas touchées.\n  theme    : impose ce thème à tous les articles de la source (null = tri par mots-clés)\n  langue   : fr, en… sert à l'extraction des noms de lieux\n  frequence_minutes : délai minimal entre deux interrogations de cette source\n\nATTENTION : les adresses des flux de think tanks ajoutées pour le thème « geo » n'ont pas pu être testées (réseau sortant bloqué là où elles ont été écrites). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte, puis corriger ou désactiver ce qui ne répond pas. Une source qui échoue plusieurs fois est de toute façon mise de côté par le disjoncteur : elle ne ralentit pas les autres.",
+  "_commentaire": "Sources de la veille. Ce fichier est le catalogue déclaré : à chaque collecte il est appliqué à la base (création des nouvelles sources, mise à jour de l'adresse, du thème imposé, de la langue et de la fréquence). L'interrupteur « actif » n'est posé qu'à la création : ensuite c'est l'administration qui décide quelles sources tournent. Une source retirée d'ici est désactivée, jamais supprimée : ses articles restent. Les sources ajoutées depuis l'administration ne sont pas touchées.\n  theme    : impose ce thème à tous les articles de la source (null = tri par mots-clés)\n  langue   : fr, en… sert à l'extraction des noms de lieux\n  frequence_minutes : délai minimal entre deux interrogations de cette source\n\nATTENTION : toutes les sources dont la note porte « Adresse NON VÉRIFIÉE » ont été écrites d'après les conventions habituelles (/feed/ pour WordPress, /rss.xml ailleurs) sans avoir pu être testées : le réseau sortant était bloqué là où elles ont été ajoutées. Avant la première collecte :\n    uv run collecteur/admin.py verifier-flux --decouvrir --ecrire\n  La commande interroge chaque source, cherche l'adresse de celles qui échouent en la demandant au site lui-même, écrit ici les adresses trouvées et remplace l'avertissement par la date de vérification. Ce qui reste en échec est à corriger ou à désactiver. Une source qui échoue plusieurs fois est de toute façon mise de côté par le disjoncteur : elle ne ralentit pas les autres.",
   "flux": [
     {
       "nom": "Le Monde",
@@ -237,6 +237,256 @@
       "frequence_minutes": 360,
       "actif": true,
       "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+    },
+    {
+      "nom": "Opex360 (Zone militaire)",
+      "type": "rss",
+      "url": "https://www.opex360.com/feed/",
+      "theme": "def",
+      "langue": "fr",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Suivi quotidien des opérations et des programmes d'armement français. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Forces Operations Blog",
+      "type": "rss",
+      "url": "https://www.forcesoperations.com/feed/",
+      "theme": "def",
+      "langue": "fr",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Industrie de défense et forces armées, Europe et France. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Meta-Defense",
+      "type": "rss",
+      "url": "https://meta-defense.fr/feed/",
+      "theme": "def",
+      "langue": "fr",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Analyse des équilibres militaires et des programmes d'armement. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Mer et Marine",
+      "type": "rss",
+      "url": "https://www.meretmarine.com/fr/rss.xml",
+      "theme": "def",
+      "langue": "fr",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Marine militaire et marchande, construction navale. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "East Pendulum",
+      "type": "rss",
+      "url": "https://www.eastpendulum.com/feed/",
+      "theme": "def",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Suivi documenté de l'appareil militaire et industriel chinois. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Ministère des Armées",
+      "type": "rss",
+      "url": "https://www.defense.gouv.fr/rss.xml",
+      "theme": "def",
+      "langue": "fr",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Communiqués et actualités officielles des armées françaises. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Le Monde diplomatique",
+      "type": "rss",
+      "url": "https://www.monde-diplomatique.fr/rss",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Mensuel d'analyse des relations internationales. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Orient XXI",
+      "type": "rss",
+      "url": "https://orientxxi.info/spip.php?page=backend",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Monde arabe et musulman : analyses et enquêtes. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Politique étrangère (Ifri)",
+      "type": "rss",
+      "url": "https://politique-etrangere.com/feed/",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Blog de la revue trimestrielle de l'Ifri. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Géoconfluences (ENS Lyon)",
+      "type": "rss",
+      "url": "https://geoconfluences.ens-lyon.fr/rss.xml",
+      "theme": "geo",
+      "langue": "fr",
+      "frequence_minutes": 1440,
+      "actif": true,
+      "notes": "Ressources de géographie universitaire, dossiers de fond. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "The Conversation France",
+      "type": "rss",
+      "url": "https://theconversation.com/fr/articles.atom",
+      "theme": null,
+      "langue": "fr",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Analyses signées par des universitaires, tous domaines. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Defense News",
+      "type": "rss",
+      "url": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
+      "theme": "def",
+      "langue": "en",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Programmes d'armement et industrie de défense, international. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Breaking Defense",
+      "type": "rss",
+      "url": "https://breakingdefense.com/feed/",
+      "theme": "def",
+      "langue": "en",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Défense américaine et alliée, politique d'acquisition. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Defense One",
+      "type": "rss",
+      "url": "https://www.defenseone.com/rss/all/",
+      "theme": "def",
+      "langue": "en",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Stratégie et technologies militaires américaines. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Naval News",
+      "type": "rss",
+      "url": "https://www.navalnews.com/feed/",
+      "theme": "def",
+      "langue": "en",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Marines militaires du monde entier. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "The War Zone",
+      "type": "rss",
+      "url": "https://www.twz.com/feed",
+      "theme": "def",
+      "langue": "en",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Analyse technique des matériels et des opérations. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "OTAN – actualités",
+      "type": "rss",
+      "url": "https://www.nato.int/cps/en/natohq/news_rss.htm",
+      "theme": "def",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Communiqués officiels de l'Alliance atlantique. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Foreign Affairs",
+      "type": "rss",
+      "url": "https://www.foreignaffairs.com/rss.xml",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Revue de référence des relations internationales (Council on Foreign Relations). Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Foreign Policy",
+      "type": "rss",
+      "url": "https://foreignpolicy.com/feed/",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Magazine d'analyse des affaires mondiales. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "The Diplomat",
+      "type": "rss",
+      "url": "https://thediplomat.com/feed/",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Asie-Pacifique : politique, sécurité, économie. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Chatham House",
+      "type": "rss",
+      "url": "https://www.chathamhouse.org/rss/all",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Royal Institute of International Affairs, Londres. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "RUSI",
+      "type": "rss",
+      "url": "https://www.rusi.org/rss.xml",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Royal United Services Institute : défense et sécurité. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "CSIS",
+      "type": "rss",
+      "url": "https://www.csis.org/analysis/feed",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Center for Strategic and International Studies, Washington. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "SWP Berlin",
+      "type": "rss",
+      "url": "https://www.swp-berlin.org/rss/en-publications.xml",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Institut allemand de politique internationale et de sécurité. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Responsible Statecraft",
+      "type": "rss",
+      "url": "https://responsiblestatecraft.org/feed/",
+      "theme": "geo",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Quincy Institute : critique de la politique étrangère américaine. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
     }
   ]
 }
