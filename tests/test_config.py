@@ -46,9 +46,6 @@ def test_le_theme_geopolitique_et_ses_flux_sont_livres():
     # n'aurait aucun sens
     assert all(f["frequence_minutes"] >= 180 for f in geo)
     assert {f["langue"] for f in geo} == {"fr", "en"}
-    # chaque adresse non testée doit le dire : personne ne doit croire qu'elles sont sûres
-    assert all("VÉRIFIÉE" in f.get("notes", "") or "confirmer" in f.get("notes", "")
-               for f in geo)
 
 
 def test_le_theme_cybersecurite_et_ses_flux_sont_livres():
@@ -58,8 +55,6 @@ def test_le_theme_cybersecurite_et_ses_flux_sont_livres():
     assert {f["nom"] for f in cyb} >= {"CERT-FR (ANSSI)", "Krebs on Security",
                                        "BleepingComputer", "The Record"}
     assert {f["langue"] for f in cyb} == {"fr", "en"}
-    assert all("VÉRIFIÉE" in f.get("notes", "") or "confirmer" in f.get("notes", "")
-               for f in cyb)
 
 
 def test_les_mots_cles_cyber_ont_quitte_tec():
@@ -124,6 +119,41 @@ def test_les_mots_cles_geo_ne_devorent_pas_les_autres_themes():
                   "Great power competition in the Indo-Pacific",
                   "Autonomie stratégique européenne : où en est-on ?"):
         assert collect.classer(titre, "", tables) == "geo", titre
+
+
+# Les adresses ont été interrogées pour de bon le 28/10/2026. Ces trois tests gardent le
+# résultat de cette vérification : une adresse ajoutée plus tard sans être testée se verra
+# tout de suite, et une source déclarée morte ne doit pas continuer à être interrogée.
+def test_chaque_flux_porte_le_verdict_de_sa_verification():
+    sans_verdict = [f["nom"] for f in base.lire_config(base.FLUX_JSON, "flux")
+                    if f["type"] == "rss"
+                    and "vérifiée le" not in f.get("notes", "")
+                    and "NE RÉPOND PAS" not in f.get("notes", "")]
+    assert not sans_verdict, ("adresses jamais testées : lancer « admin.py verifier-flux "
+                              f"--decouvrir --ecrire » pour {sans_verdict}")
+
+
+def test_une_source_qui_ne_repond_pas_est_coupee():
+    """La laisser active coûterait une requête perdue par collecte, et un disjoncteur."""
+    actives_mortes = [f["nom"] for f in base.lire_config(base.FLUX_JSON, "flux")
+                      if "NE RÉPOND PAS" in f.get("notes", "") and f.get("actif", True)]
+    assert not actives_mortes
+
+
+def test_une_source_coupee_dit_pourquoi():
+    muettes = [f["nom"] for f in base.lire_config(base.FLUX_JSON, "flux")
+               if not f.get("actif", True) and len(f.get("notes", "")) < 40]
+    assert not muettes, f"coupées sans motif écrit : {muettes}"
+
+
+def test_il_reste_assez_de_sources_actives():
+    """Garde-fou grossier : si une mise à jour en coupe la moitié, il faut le voir."""
+    flux = base.lire_config(base.FLUX_JSON, "flux")
+    actives = [f for f in flux if f.get("actif", True)]
+    assert len(actives) >= 40, f"{len(actives)} sources actives sur {len(flux)}"
+    par_theme = {t: sum(1 for f in actives if f.get("theme") == t)
+                 for t in ("def", "geo", "cyb")}
+    assert all(n >= 5 for n in par_theme.values()), par_theme
 
 
 def test_les_themes_ne_sont_plus_codes_en_dur():

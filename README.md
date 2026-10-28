@@ -171,16 +171,33 @@ lus. Les adresses essayées passent par le même contrôle anti-SSRF que la coll
 
 ### Les sources livrées
 
-62 sources : 7 généralistes, 12 de défense, 28 de géopolitique, 14 de cybersécurité,
-1 d'alertes catastrophes. 34 en français, 28 en anglais.
+**62 sources déclarées, 46 actives.** Toutes les adresses ont été interrogées pour
+de bon le 28 octobre 2026 : 44 répondaient, dont 8 à une autre adresse que celle écrite au
+départ, et 14 ne répondent pas du tout — celles-là sont coupées, avec le motif constaté
+écrit dans leur note. Chaque entrée de `config/flux.json` porte désormais soit
+« Adresse vérifiée le … », soit « NE RÉPOND PAS — … », et trois tests l'exigent.
 
-| Thème | Sources |
+| Thème | Sources actives |
 |---|---|
-| *(aucun — tri par mots-clés)* | Le Monde, France 24, RFI, franceinfo, Courrier international, The Conversation France, ReliefWeb |
-| `def` Conflits et défense | Opex360, Forces Operations Blog, Meta-Defense, Mer et Marine, East Pendulum, Ministère des Armées, Defense News, Breaking Defense, Defense One, Naval News, The War Zone, OTAN |
-| `geo` Géopolitique | IFRI, IRSEM, Le Grand Continent, Revue Défense Nationale, Le Rubicon, Revue Conflits, Diploweb, Institut Montaigne, Fondation Robert Schuman, Areion24, Politique étrangère, Le Monde diplomatique, Orient XXI, Géoconfluences, The National Interest, War on the Rocks, ECFR, Carnegie, Atlantic Council, Lowy Institute, Foreign Affairs, Foreign Policy, The Diplomat, Chatham House, RUSI, CSIS, SWP Berlin, Responsible Statecraft |
-| `cyb` Cybersécurité et informatique | CERT-FR, ANSSI, LeMagIT, Le Monde Informatique, Next, ZATAZ, Krebs on Security, BleepingComputer, The Record, The Hacker News, Dark Reading, CISA, Schneier on Security, Ars Technica |
-| `cli` Climat et catastrophes | GDACS |
+| *(aucun — tri par mots-clés)* | Le Monde, France 24, RFI, franceinfo, The Conversation France, Ars Technica |
+| `def` Conflits et défense | Opex360 (Zone militaire), Forces Operations Blog, Defense News, Breaking Defense, Defense One, Naval News, The War Zone |
+| `geo` Géopolitique | Le Grand Continent, The National Interest, Le Rubicon, Revue Conflits, Diploweb, Institut Montaigne, Areion24.news, War on the Rocks, Atlantic Council, Lowy Institute – The Interpreter, Le Monde diplomatique, Orient XXI, Politique étrangère (Ifri), Foreign Affairs, Foreign Policy, The Diplomat, RUSI, CSIS, SWP Berlin, Responsible Statecraft |
+| `cyb` Cybersécurité et informatique | CERT-FR (ANSSI), LeMagIT, Le Monde Informatique, Next, ZATAZ, Krebs on Security, BleepingComputer, The Record, The Hacker News, Dark Reading, CISA – avis de sécurité, Schneier on Security |
+| `cli` Climat et catastrophes | GDACS (ONU / Commission européenne) |
+
+**Les quatorze sources coupées, et pourquoi** (à réactiver depuis l'administration si elles
+reviennent) :
+
+| Motif | Sources |
+|---|---|
+| Filtrage anti-robot : 403 ou connexion coupée sur tout le site | IFRI, Chatham House, ECFR, Géoconfluences, ANSSI (`cyber.gouv.fr`) |
+| Plus aucun flux : 404 partout, rien d'annoncé par le site | IRSEM, Revue Défense Nationale, Ministère des Armées, OTAN |
+| Répond 200 mais sert du HTML | Carnegie Endowment, Fondation Robert Schuman, Mer et Marine |
+| Flux retiré volontairement (410 Gone) | Meta-Defense |
+| Flux cassé côté site : que des avertissements PHP, aucun XML | East Pendulum |
+
+Le CERT-FR, lui, répond très bien (40 avis) : c'est le portail `cyber.gouv.fr` de l'ANSSI
+qui est derrière une protection anti-robot, pas le CERT.
 
 Les fréquences suivent le rythme réel de publication : 60 min pour un quotidien, 120 à 180
 pour la presse spécialisée, 360 pour les instituts, 1 440 pour une revue universitaire.
@@ -201,18 +218,21 @@ artificielle, et a reçu en échange `recherche`, `laboratoire`, `biotech*`, `te
 mot-clé appartienne à deux thèmes, ou qu'une racine en couvre un autre du même thème
 (`cyber*` rendait `cyberattaque*` inutile, et doublait son score).
 
-> ⚠️ **Les 55 adresses ajoutées pour `def`, `geo` et `cyb` n'ont jamais été testées.** Le réseau
-> extérieur n'était pas joignable depuis l'environnement où elles ont été écrites : elles
-> suivent les conventions habituelles (`/feed/` pour WordPress, `/rss.xml` ailleurs) et
-> chacune porte une note le disant dans `config/flux.json`. Avant la première collecte :
->
-> ```bash
-> uv run collecteur/admin.py verifier-flux --decouvrir --ecrire
-> ```
->
-> Ce qui reste en échec est à corriger à la main ou à désactiver. Une source qui échoue
-> plusieurs fois est de toute façon mise de côté par le disjoncteur : elle ne ralentit pas
-> les autres.
+À refaire de temps en temps, un flux ne prévenant pas quand il déménage :
+
+```bash
+uv run collecteur/admin.py verifier-flux --decouvrir --ecrire
+```
+
+Les huit adresses corrigées l'ont été par cette commande ou par le même procédé à la main :
+`nationalinterest.org/feed/`, `navalnews.com/feed/?feed=rss2`,
+`rusi.org/rss/latest-commentary.xml` (annoncée par le site), `csis.org/rss.xml`,
+`swp-berlin.org/rss.xml`, `feeds.arstechnica.com/arstechnica/index.xml`,
+`lemagit.fr/rss/ContentSyndication.xml` et `orientxxi.info/spip.php?page=backend&lang=fr`.
+
+Ars Technica n'a pas de flux pour sa seule rubrique sécurité : c'est le flux général du
+site qui est repris, et son thème est donc laissé au tri par mots-clés plutôt qu'imposé
+à `cyb` — sinon l'astronomie finirait en cybersécurité.
 
 **Un nouveau type d'API** demande du code : écrire `source_xxx(s, hors_ligne, …)` dans
 `collect.py`, l'appeler depuis `collecter_source()`, et ajouter le type dans `TYPES_SOURCES`
@@ -588,6 +608,35 @@ uv run bancs/bench_lieux.py                           # precision de la localisa
 node bancs/bench_accessibilite.mjs http://127.0.0.1:8000/
 ```
 
+### Ce que donnent les vraies dépêches
+
+Mesure du 28 octobre 2026 : les 45 flux actifs interrogés une fois, **1 372 articles réels**
+passés dans le tri et la localisation, sans rien enregistrer.
+
+| | |
+|---|---|
+| Articles placés sur la carte | 833 (**61 %**) |
+| Zone **et** thème, donc diffusés (D04) | 867 (**63 %**) |
+| Thème mais **pas de zone**, donc écartés | 452 (**33 %**) |
+| Ni l'un ni l'autre | 27 (2 %) |
+| Non classés par les mots-clés, flux sans thème imposé | 53 sur 157 (**34 %**) |
+
+Les 61 % de placement sont en dessous des 81 % mesurés sur le banc de flux : c'est attendu,
+le banc rejoue des dépêches d'agence, qui nomment presque toujours un lieu, là où une note
+d'institut s'intitule « Vers un ordre multipolaire ? ».
+
+Les 34 % d'articles non classés par les mots-clés sont exactement la population que le
+classement par IA viserait, et une bonne base pour juger s'il apporte quelque chose.
+
+> ⚠️ **Un tiers des articles ne sort pas.** 452 articles ont un thème mais aucune zone, et la
+> règle D04 — ne diffuser que ce qui a *zone et thème* — les écarte. Ce sont surtout les
+> sources ajoutées récemment : 204 de `cyb`, 181 de `geo`, 50 de `def`. Un avis du CERT-FR
+> sur une faille, une analyse sur la dissuasion, n'ont pas de lieu et n'en auront jamais.
+> La question D04 figurait déjà dans les points à valider ; elle a maintenant un chiffre.
+> Lever l'exigence de zone pour les flux à thème imposé remettrait ces 452 articles dans le
+> fil sans rien changer à la carte, qui ne montre de toute façon que les articles localisés.
+> **C'est une décision de cahier des charges, elle n'a pas été prise ici.**
+
 ### Pourquoi Python, et quand rouvrir la question
 
 Le choix de rester en Python plutôt que de passer à Go repose sur des mesures, pas sur une
@@ -614,23 +663,25 @@ Les thèmes ne sont plus codés en dur : voir `config/themes.json`.
 
 ## Points à valider (lot LT3)
 
-- **Les 41 adresses ajoutées pour `def` et `geo`, jamais testées** : lancer
-  `uv run collecteur/admin.py verifier-flux --decouvrir --ecrire` et corriger ou désactiver
-  ce qui ne répond toujours pas.
+- **Les cinq sources bloquées par filtrage anti-robot** (IFRI, Chatham House, ECFR,
+  Géoconfluences, ANSSI) : leur écrire pour demander un accès, ou s'en passer.
 - Les conditions d'utilisation de chaque source (C03, C04), et celles du fournisseur de
   modèle si le classement par IA est activé.
 - **Le classement par IA et le récapitulatif sur des données réelles** : ils n'ont été
   vérifiés que sur des réponses simulées. Après quelques jours, comparer `admin.py ia` et
   `admin.py a-trier` pour savoir si le classement apporte quelque chose et avec quel taux
   d'erreur, et relire quelques récapitulatifs pour vérifier qu'ils n'inventent rien.
-- **Les mots-clés de `cyb`** : le thème est neuf, ses 60 mots-clés n'ont jamais tourné sur
-  de vraies dépêches. `admin.py a-trier` dira ce qui lui échappe.
+- **Les mots-clés de `cyb` hors flux spécialisés** : sur 157 articles de flux généralistes,
+  un seul a été classé en `cyb` par les mots-clés. L'échantillon est petit, mais il faudra
+  vérifier après quelques jours que ce n'est pas un trou dans la liste.
 - Les mots-clés : les enrichir à partir de `admin.py a-trier` après quelques jours.
 - Les cas limites de zones : la Turquie et le Soudan sont en Moyen-Orient et Afrique du Nord,
   le Groenland en Europe.
 - Les exonymes français (`config/exonymes.json`) et les noms à ignorer
   (`config/lieux_ignores.json`), à enrichir dès qu'un cas réel est mal traité.
 - Le fond de carte : rester sur les tuiles OpenStreetMap ou installer son propre serveur.
-- D04 : faut-il encore exiger une zone **et** un thème pour diffuser, maintenant que la zone
-  n'apparaît plus sur le site ? Elle est aujourd'hui déduite du lieu, donc la question ne
-  coûte plus de points sur la carte, mais elle reste ouverte.
+- **D04, maintenant chiffrée** : faut-il encore exiger une zone **et** un thème pour
+  diffuser ? Sur 1 372 articles réels, 452 (un tiers) ont un thème mais pas de zone et
+  restent invisibles. Voir « Ce que donnent les vraies dépêches ». La zone n'apparaît plus
+  sur le site et la carte n'affiche que les articles localisés : l'exigence ne protège plus
+  rien de visible.

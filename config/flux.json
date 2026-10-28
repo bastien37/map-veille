@@ -8,7 +8,8 @@
       "theme": null,
       "langue": "fr",
       "frequence_minutes": 60,
-      "actif": true
+      "actif": true,
+      "notes": "Adresse vérifiée le 28/10/2026 : 20 articles lus."
     },
     {
       "nom": "France 24",
@@ -17,7 +18,8 @@
       "theme": null,
       "langue": "fr",
       "frequence_minutes": 60,
-      "actif": true
+      "actif": true,
+      "notes": "Adresse vérifiée le 28/10/2026 : 24 articles lus."
     },
     {
       "nom": "RFI",
@@ -26,7 +28,8 @@
       "theme": null,
       "langue": "fr",
       "frequence_minutes": 60,
-      "actif": true
+      "actif": true,
+      "notes": "Adresse vérifiée le 28/10/2026 : 23 articles lus."
     },
     {
       "nom": "franceinfo",
@@ -35,7 +38,8 @@
       "theme": null,
       "langue": "fr",
       "frequence_minutes": 60,
-      "actif": true
+      "actif": true,
+      "notes": "Adresse vérifiée le 28/10/2026 : 20 articles lus."
     },
     {
       "nom": "Courrier international",
@@ -44,7 +48,8 @@
       "theme": null,
       "langue": "fr",
       "frequence_minutes": 60,
-      "actif": false
+      "actif": false,
+      "notes": "Adresse vérifiée le 28/10/2026 : 20 articles lus."
     },
     {
       "nom": "GDACS (ONU / Commission européenne)",
@@ -85,8 +90,8 @@
       "theme": "geo",
       "langue": "fr",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "Institut français des relations internationales. Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — 403 sur tout le site, y compris la page d'accueil : filtrage anti-robot. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "IRSEM",
@@ -95,8 +100,8 @@
       "theme": "geo",
       "langue": "fr",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "Institut de recherche stratégique de l'École militaire. Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — 404 sur toutes les adresses essayées, aucun flux annoncé par le site. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "Le Grand Continent",
@@ -106,7 +111,7 @@
       "langue": "fr",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+      "notes": "Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "Revue Défense Nationale",
@@ -115,18 +120,18 @@
       "theme": "geo",
       "langue": "fr",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "RDN. Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — 404 sur toutes les adresses essayées, aucun flux annoncé. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "The National Interest",
       "type": "rss",
-      "url": "https://nationalinterest.org/rss.xml",
+      "url": "https://nationalinterest.org/feed/",
       "theme": "geo",
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+      "notes": "Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "Le Rubicon",
@@ -136,7 +141,7 @@
       "langue": "fr",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+      "notes": "Adresse vérifiée le 28/10/2026 : 100 articles lus."
     },
     {
       "nom": "Revue Conflits",
@@ -146,7 +151,7 @@
       "langue": "fr",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+      "notes": "Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "Diploweb",
@@ -156,7 +161,7 @@
       "langue": "fr",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Site SPIP : page=backend est l'adresse habituelle du flux. Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+      "notes": "Site SPIP : page=backend est l'adresse habituelle du flux. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "Institut Montaigne",
@@ -166,7 +171,7 @@
       "langue": "fr",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+      "notes": "Adresse vérifiée le 28/10/2026 : 28 articles lus."
     },
     {
       "nom": "Fondation Robert Schuman",
@@ -175,8 +180,8 @@
       "theme": "geo",
       "langue": "fr",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — répond 200 mais sert du HTML : plus de flux. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "Areion24.news",
@@ -186,7 +191,7 @@
       "langue": "fr",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+      "notes": "Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "War on the Rocks",
@@ -196,7 +201,7 @@
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+      "notes": "Adresse vérifiée le 28/10/2026 : 100 articles lus."
     },
     {
       "nom": "ECFR",
@@ -205,8 +210,8 @@
       "theme": "geo",
       "langue": "en",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "European Council on Foreign Relations. Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — 403 sur toutes les adresses de flux, que le site documente pourtant lui-même sur ecfr.eu/feeds. Seul le flux de podcast passe, hors sujet ici. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "Carnegie Endowment",
@@ -215,8 +220,8 @@
       "theme": "geo",
       "langue": "en",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — répond 200 mais sert du HTML : le site n'a plus de flux. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "Atlantic Council",
@@ -226,7 +231,7 @@
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Site WordPress : /feed/ est l'adresse standard, mais à confirmer avec « uv run collecteur/admin.py verifier-flux »."
+      "notes": "Adresse vérifiée le 28/10/2026 : 100 articles lus."
     },
     {
       "nom": "Lowy Institute – The Interpreter",
@@ -236,7 +241,7 @@
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Adresse NON VÉRIFIÉE : elle n'a pas pu être testée depuis l'environnement de développement (réseau sortant bloqué). Lancer « uv run collecteur/admin.py verifier-flux » avant la première collecte."
+      "notes": "Adresse vérifiée le 28/10/2026 : 50 articles lus."
     },
     {
       "nom": "Opex360 (Zone militaire)",
@@ -246,7 +251,7 @@
       "langue": "fr",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Suivi quotidien des opérations et des programmes d'armement français. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Suivi quotidien des opérations et des programmes d'armement français. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "Forces Operations Blog",
@@ -256,7 +261,7 @@
       "langue": "fr",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Industrie de défense et forces armées, Europe et France. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Industrie de défense et forces armées, Europe et France. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "Meta-Defense",
@@ -265,8 +270,8 @@
       "theme": "def",
       "langue": "fr",
       "frequence_minutes": 120,
-      "actif": true,
-      "notes": "Analyse des équilibres militaires et des programmes d'armement. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — 410 Gone : le flux a été retiré volontairement. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "Mer et Marine",
@@ -275,8 +280,8 @@
       "theme": "def",
       "langue": "fr",
       "frequence_minutes": 180,
-      "actif": true,
-      "notes": "Marine militaire et marchande, construction navale. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — répond 200 mais sert une page HTML paginée, pas un flux. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "East Pendulum",
@@ -285,8 +290,8 @@
       "theme": "def",
       "langue": "fr",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "Suivi documenté de l'appareil militaire et industriel chinois. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — le flux ne contient que des avertissements PHP, aucun XML : cassé côté site. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "Ministère des Armées",
@@ -295,8 +300,8 @@
       "theme": "def",
       "langue": "fr",
       "frequence_minutes": 180,
-      "actif": true,
-      "notes": "Communiqués et actualités officielles des armées françaises. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — 404 sur toutes les adresses essayées, aucun flux annoncé. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "Le Monde diplomatique",
@@ -306,17 +311,17 @@
       "langue": "fr",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Mensuel d'analyse des relations internationales. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Mensuel d'analyse des relations internationales. Adresse vérifiée le 28/10/2026 : 20 articles lus."
     },
     {
       "nom": "Orient XXI",
       "type": "rss",
-      "url": "https://orientxxi.info/spip.php?page=backend",
+      "url": "https://orientxxi.info/spip.php?page=backend&lang=fr",
       "theme": "geo",
       "langue": "fr",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Monde arabe et musulman : analyses et enquêtes. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Monde arabe et musulman : analyses et enquêtes. Adresse vérifiée le 28/10/2026 : 54 articles lus."
     },
     {
       "nom": "Politique étrangère (Ifri)",
@@ -326,7 +331,7 @@
       "langue": "fr",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Blog de la revue trimestrielle de l'Ifri. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Blog de la revue trimestrielle de l'Ifri. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "Géoconfluences (ENS Lyon)",
@@ -335,8 +340,8 @@
       "theme": "geo",
       "langue": "fr",
       "frequence_minutes": 1440,
-      "actif": true,
-      "notes": "Ressources de géographie universitaire, dossiers de fond. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — connexion coupée par le serveur, page d'accueil comprise. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "The Conversation France",
@@ -346,7 +351,7 @@
       "langue": "fr",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Analyses signées par des universitaires, tous domaines. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Analyses signées par des universitaires, tous domaines. Adresse vérifiée le 28/10/2026 : 50 articles lus."
     },
     {
       "nom": "Defense News",
@@ -356,7 +361,7 @@
       "langue": "en",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Programmes d'armement et industrie de défense, international. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Programmes d'armement et industrie de défense, international. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "Breaking Defense",
@@ -366,7 +371,7 @@
       "langue": "en",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Défense américaine et alliée, politique d'acquisition. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Défense américaine et alliée, politique d'acquisition. Adresse vérifiée le 28/10/2026 : 15 articles lus."
     },
     {
       "nom": "Defense One",
@@ -376,17 +381,17 @@
       "langue": "en",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Stratégie et technologies militaires américaines. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Stratégie et technologies militaires américaines. Adresse vérifiée le 28/10/2026 : 19 articles lus."
     },
     {
       "nom": "Naval News",
       "type": "rss",
-      "url": "https://www.navalnews.com/feed/",
+      "url": "https://www.navalnews.com/feed/?feed=rss2",
       "theme": "def",
       "langue": "en",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Marines militaires du monde entier. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Marines militaires du monde entier. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "The War Zone",
@@ -396,7 +401,7 @@
       "langue": "en",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Analyse technique des matériels et des opérations. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Analyse technique des matériels et des opérations. Adresse vérifiée le 28/10/2026 : 37 articles lus."
     },
     {
       "nom": "OTAN – actualités",
@@ -405,8 +410,8 @@
       "theme": "def",
       "langue": "en",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "Communiqués officiels de l'Alliance atlantique. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — 404 sur toutes les adresses essayées, aucun flux annoncé. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "Foreign Affairs",
@@ -416,7 +421,7 @@
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Revue de référence des relations internationales (Council on Foreign Relations). Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Revue de référence des relations internationales (Council on Foreign Relations). Adresse vérifiée le 28/10/2026 : 20 articles lus."
     },
     {
       "nom": "Foreign Policy",
@@ -426,7 +431,7 @@
       "langue": "en",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Magazine d'analyse des affaires mondiales. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Magazine d'analyse des affaires mondiales. Adresse vérifiée le 28/10/2026 : 25 articles lus."
     },
     {
       "nom": "The Diplomat",
@@ -436,7 +441,7 @@
       "langue": "en",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Asie-Pacifique : politique, sécurité, économie. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Asie-Pacifique : politique, sécurité, économie. Adresse vérifiée le 28/10/2026 : 96 articles lus."
     },
     {
       "nom": "Chatham House",
@@ -445,38 +450,38 @@
       "theme": "geo",
       "langue": "en",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "Royal Institute of International Affairs, Londres. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — 403 sur tout le site : filtrage anti-robot. Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "RUSI",
       "type": "rss",
-      "url": "https://www.rusi.org/rss.xml",
+      "url": "https://www.rusi.org/rss/latest-commentary.xml",
       "theme": "geo",
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Royal United Services Institute : défense et sécurité. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Royal United Services Institute : défense et sécurité. Adresse vérifiée le 28/10/2026 : 20 articles lus."
     },
     {
       "nom": "CSIS",
       "type": "rss",
-      "url": "https://www.csis.org/analysis/feed",
+      "url": "https://www.csis.org/rss.xml",
       "theme": "geo",
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Center for Strategic and International Studies, Washington. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Center for Strategic and International Studies, Washington. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "SWP Berlin",
       "type": "rss",
-      "url": "https://www.swp-berlin.org/rss/en-publications.xml",
+      "url": "https://www.swp-berlin.org/rss.xml",
       "theme": "geo",
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Institut allemand de politique internationale et de sécurité. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Institut allemand de politique internationale et de sécurité. Adresse vérifiée le 28/10/2026 : 91 articles lus."
     },
     {
       "nom": "Responsible Statecraft",
@@ -486,7 +491,7 @@
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Quincy Institute : critique de la politique étrangère américaine. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Quincy Institute : critique de la politique étrangère américaine. Adresse vérifiée le 28/10/2026 : 30 articles lus."
     },
     {
       "nom": "CERT-FR (ANSSI)",
@@ -496,7 +501,7 @@
       "langue": "fr",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Alertes, avis et bulletins officiels du CERT gouvernemental français. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Alertes, avis et bulletins officiels du CERT gouvernemental français. Adresse vérifiée le 28/10/2026 : 40 articles lus."
     },
     {
       "nom": "ANSSI",
@@ -505,18 +510,18 @@
       "theme": "cyb",
       "langue": "fr",
       "frequence_minutes": 360,
-      "actif": true,
-      "notes": "Agence nationale de la sécurité des systèmes d'information. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "actif": false,
+      "notes": "Vérifiée le 28/10/2026 : NE RÉPOND PAS — protection Incapsula sur cyber.gouv.fr (le CERT-FR, lui, répond très bien). Source coupée ; la réactiver depuis l'administration si elle revient."
     },
     {
       "nom": "LeMagIT",
       "type": "rss",
-      "url": "https://www.lemagit.fr/rss/toutes-les-actualites.html",
+      "url": "https://www.lemagit.fr/rss/ContentSyndication.xml",
       "theme": "cyb",
       "langue": "fr",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Actualité des systèmes d'information pour les professionnels. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Actualité des systèmes d'information pour les professionnels. Adresse vérifiée le 28/10/2026 : 20 articles lus."
     },
     {
       "nom": "Le Monde Informatique",
@@ -526,7 +531,7 @@
       "langue": "fr",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Presse informatique professionnelle. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Presse informatique professionnelle. Adresse vérifiée le 28/10/2026 : 20 articles lus."
     },
     {
       "nom": "Next",
@@ -536,7 +541,7 @@
       "langue": "fr",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Numérique, logiciel libre et libertés (ex-Next INpact). Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Numérique, logiciel libre et libertés (ex-Next INpact). Adresse vérifiée le 28/10/2026 : 50 articles lus."
     },
     {
       "nom": "ZATAZ",
@@ -546,7 +551,7 @@
       "langue": "fr",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Veille sur les fuites de données et la cybercriminalité francophone. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Veille sur les fuites de données et la cybercriminalité francophone. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "Krebs on Security",
@@ -556,7 +561,7 @@
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Enquêtes de Brian Krebs sur la cybercriminalité. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Enquêtes de Brian Krebs sur la cybercriminalité. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
       "nom": "BleepingComputer",
@@ -566,7 +571,7 @@
       "langue": "en",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Incidents, rançongiciels et correctifs, au jour le jour. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Incidents, rançongiciels et correctifs, au jour le jour. Adresse vérifiée le 28/10/2026 : 15 articles lus."
     },
     {
       "nom": "The Record",
@@ -576,7 +581,7 @@
       "langue": "en",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Cybersécurité et cyberconflit (Recorded Future News). Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Cybersécurité et cyberconflit (Recorded Future News). Adresse vérifiée le 28/10/2026 : 5 articles lus."
     },
     {
       "nom": "The Hacker News",
@@ -586,7 +591,7 @@
       "langue": "en",
       "frequence_minutes": 120,
       "actif": true,
-      "notes": "Vulnérabilités et campagnes d'attaque. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Vulnérabilités et campagnes d'attaque. Adresse vérifiée le 28/10/2026 : 50 articles lus."
     },
     {
       "nom": "Dark Reading",
@@ -596,7 +601,7 @@
       "langue": "en",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Sécurité des systèmes d'information en entreprise. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Sécurité des systèmes d'information en entreprise. Adresse vérifiée le 28/10/2026 : 50 articles lus."
     },
     {
       "nom": "CISA – avis de sécurité",
@@ -606,7 +611,7 @@
       "langue": "en",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Avis officiels de l'agence américaine de cybersécurité. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Avis officiels de l'agence américaine de cybersécurité. Adresse vérifiée le 28/10/2026 : 30 articles lus."
     },
     {
       "nom": "Schneier on Security",
@@ -616,17 +621,17 @@
       "langue": "en",
       "frequence_minutes": 360,
       "actif": true,
-      "notes": "Analyses de Bruce Schneier sur la sécurité et la cryptographie. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Analyses de Bruce Schneier sur la sécurité et la cryptographie. Adresse vérifiée le 28/10/2026 : 10 articles lus."
     },
     {
-      "nom": "Ars Technica – sécurité",
+      "nom": "Ars Technica",
       "type": "rss",
-      "url": "https://feeds.arstechnica.com/arstechnica/security",
-      "theme": "cyb",
+      "url": "https://feeds.arstechnica.com/arstechnica/index.xml",
+      "theme": null,
       "langue": "en",
       "frequence_minutes": 180,
       "actif": true,
-      "notes": "Enquêtes techniques sur les failles et les incidents. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+      "notes": "Flux général du site : la rubrique sécurité n'a pas de flux propre, donc le thème est laissé au tri par mots-clés. Enquêtes techniques sur les failles et les incidents. Adresse vérifiée le 28/10/2026 : 20 articles lus."
     }
   ]
 }
