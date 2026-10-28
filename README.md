@@ -10,11 +10,14 @@ cinq sources.
 ```
 config/themes.json ─┐
 config/flux.json ───┤
+config/ia.json ─────┤
                     ▼
 Flux RSS + API ──► collecteur/collect.py ──────────► donnees/map.sqlite
 (table sources)    · téléchargement parallèle        articles, événements,
                      (ETag, disjoncteur)             sources, collectes,
-                   · tri par mots-clés               cache de géocodage
+                   · tri par mots-clés, puis         caches de géocodage
+                     modèle de langage si doute      et de classement
+                     (collecteur/ia.py)                      │
                    · localisation (collecteur/lieux.py)      │
                    · regroupement en événements               │ lecture seule
                                                               ▼
@@ -35,7 +38,9 @@ repère « Nouveau » sont calculés côté serveur.
    domaine. Un flux inchangé répond `304` et n'est pas retéléchargé ; une source en panne
    répétée est mise de côté quelque temps (disjoncteur) ; une source interrogée il y a moins
    que sa fréquence est laissée tranquille.
-3. **Tri** — zone et thème par mots-clés, en un seul balayage du texte.
+3. **Tri** — zone et thème par mots-clés, en un seul balayage du texte. Quand les
+   mots-clés hésitent, un modèle de langage peut trancher — désactivé par défaut (voir
+   « Comment un article reçoit son thème »).
 4. **Localisation** — balises géographiques du flux, sinon un nom de lieu reconnu dans le
    titre, sinon rien (voir « Comment un article arrive sur la carte »).
 5. **Regroupement** — même lieu, même fenêtre de temps, titres proches : un seul événement.
@@ -83,6 +88,7 @@ un commentaire qui explique ses champs.
 | `config/flux.json` | Les sources : nom, type, adresse, thème imposé, langue, fréquence de rafraîchissement |
 | `config/carte.json` | Le fond de carte : serveur de tuiles, attribution, vue initiale, nombre de points |
 | `config/geocodage.json` | Le service de géocodage extérieur — **désactivé par défaut** |
+| `config/ia.json` | Le modèle de langage qui classe les thèmes douteux — **désactivé par défaut** |
 | `config/exonymes.json` | Les noms français des lieux (Londres, Pékin, Le Caire…) |
 | `config/lieux_ignores.json` | Les noms de lieux à ne pas reconnaître, parce qu'ils sont aussi des mots courants |
 
@@ -133,45 +139,128 @@ Vérifier ce que la configuration a produit :
 uv run collecteur/admin.py config
 ```
 
-### Vérifier que les flux répondent
+### Vérifier que les flux répondent — et trouver leur adresse
 
 Une adresse de flux se devine mal, et une source muette ne se remarque qu'au bout de
 quelques collectes. Après chaque ajout dans `config/flux.json` :
 
 ```bash
-uv run collecteur/admin.py verifier-flux            # les sources actives
-uv run collecteur/admin.py verifier-flux --toutes   # y compris celles qui sont coupées
-uv run collecteur/admin.py verifier-flux --nom ifri
+uv run collecteur/admin.py verifier-flux                       # les sources actives
+uv run collecteur/admin.py verifier-flux --decouvrir           # et cherche ce qui échoue
+uv run collecteur/admin.py verifier-flux --decouvrir --ecrire  # et corrige le fichier
+uv run collecteur/admin.py verifier-flux --toutes --nom ifri   # une seule, même désactivée
 ```
 
 La commande interroge chaque source en parallèle **sans rien enregistrer** et affiche, pour
 chacune, `ok` avec le nombre d'articles et la date du plus récent, `vide` si elle répond sans
-rien d'exploitable, ou `NON` avec l'erreur. Les sources à revoir sont rappelées à la fin avec
-leur adresse.
+rien d'exploitable, ou `NON` avec l'erreur.
 
-### Le thème « Géopolitique et analyses stratégiques »
+`--decouvrir` ne se contente pas de constater l'échec : il demande au site **où est son
+flux**. D'abord l'annonce officielle — la balise `<link rel="alternate"
+type="application/rss+xml">` que tout site bien élevé met dans son `<head>` —, sur la page
+d'accueil puis sur le dossier de l'adresse donnée, ce qui rattrape les sites multilingues.
+Si rien n'est annoncé, les chemins conventionnels sont essayés : `/feed/`, `/rss.xml`,
+`/index.xml`, `/atom.xml`, `?feed=rss2`… à la racine puis sous le préfixe de langue. La
+première adresse qui rend de vrais articles gagne.
 
-`geo` rassemble 16 flux d'instituts et de revues — IFRI, IRSEM, Le Grand Continent, Revue
-Défense Nationale, Le Rubicon, Revue Conflits, Diploweb, Institut Montaigne, Fondation Robert
-Schuman, Areion24.news, The National Interest, War on the Rocks, ECFR, Carnegie Endowment,
-Atlantic Council, Lowy Institute. Onze en français, cinq en anglais, interrogés toutes les
-six heures : ces sources publient quelques fois par semaine, pas toutes les heures.
+`--ecrire` reporte dans `config/flux.json` les adresses trouvées, et remplace
+l'avertissement « adresse non vérifiée » par la date de vérification et le nombre d'articles
+lus. Les adresses essayées passent par le même contrôle anti-SSRF que la collecte.
 
-Ses mots-clés visent le **registre d'analyse** (« rivalité systémique », « multipolaire »,
+### Les sources livrées
+
+48 sources : 7 généralistes, 12 de défense, 28 de géopolitique, 1 d'alertes catastrophes.
+28 en français, 20 en anglais.
+
+| Thème | Sources |
+|---|---|
+| *(aucun — tri par mots-clés)* | Le Monde, France 24, RFI, franceinfo, Courrier international, The Conversation France, ReliefWeb |
+| `def` Conflits et défense | Opex360, Forces Operations Blog, Meta-Defense, Mer et Marine, East Pendulum, Ministère des Armées, Defense News, Breaking Defense, Defense One, Naval News, The War Zone, OTAN |
+| `geo` Géopolitique | IFRI, IRSEM, Le Grand Continent, Revue Défense Nationale, Le Rubicon, Revue Conflits, Diploweb, Institut Montaigne, Fondation Robert Schuman, Areion24, Politique étrangère, Le Monde diplomatique, Orient XXI, Géoconfluences, The National Interest, War on the Rocks, ECFR, Carnegie, Atlantic Council, Lowy Institute, Foreign Affairs, Foreign Policy, The Diplomat, Chatham House, RUSI, CSIS, SWP Berlin, Responsible Statecraft |
+| `cli` Climat et catastrophes | GDACS |
+
+Les fréquences suivent le rythme réel de publication : 60 min pour un quotidien, 120 à 180
+pour la presse spécialisée, 360 pour les instituts, 1 440 pour une revue universitaire.
+Interroger un trimestriel toutes les heures n'a aucun sens et use le crédit de bonne volonté
+du site.
+
+**Le thème `geo`** vise le *registre d'analyse* (« rivalité systémique », « multipolaire »,
 « autonomie stratégique », « puissance »), pas les faits : une frappe de missile reste dans
 `def`, une visite d'ambassadeur dans `dip`. Un test le vérifie
 (`tests/test_config.py::test_les_mots_cles_geo_ne_devorent_pas_les_autres_themes`).
 
-> ⚠️ **Aucune de ces 16 adresses n'a pu être testée** depuis l'environnement où elles ont été
-> ajoutées : le réseau extérieur n'y est pas joignable. Elles ont été écrites d'après les
-> conventions habituelles (`/feed/` pour les sites WordPress), et chacune porte une note le
-> disant dans `config/flux.json`. **Lancer `verifier-flux` avant la mise en production** et
-> corriger ou retirer ce qui ne répond pas.
+> ⚠️ **Les 41 adresses ajoutées pour `def` et `geo` n'ont jamais été testées.** Le réseau
+> extérieur n'était pas joignable depuis l'environnement où elles ont été écrites : elles
+> suivent les conventions habituelles (`/feed/` pour WordPress, `/rss.xml` ailleurs) et
+> chacune porte une note le disant dans `config/flux.json`. Avant la première collecte :
+>
+> ```bash
+> uv run collecteur/admin.py verifier-flux --decouvrir --ecrire
+> ```
+>
+> Ce qui reste en échec est à corriger à la main ou à désactiver. Une source qui échoue
+> plusieurs fois est de toute façon mise de côté par le disjoncteur : elle ne ralentit pas
+> les autres.
 
 **Un nouveau type d'API** demande du code : écrire `source_xxx(s, hors_ligne, …)` dans
 `collect.py`, l'appeler depuis `collecter_source()`, et ajouter le type dans `TYPES_SOURCES`
 et dans la contrainte `CHECK` de la table `sources` (`base.py`). Le tri, la localisation, le
 regroupement et le stockage sont communs.
+
+## Comment un article reçoit son thème
+
+**Les mots-clés d'abord, toujours.** Un thème imposé par la source l'emporte sur tout ; sinon
+les mots-clés de `config/themes.json` sont comptés (titre ×3, résumé ×1) et le thème qui a le
+plus de points gagne. C'est gratuit, instantané, et chaque décision s'explique en montrant le
+mot qui l'a provoquée.
+
+Ils échouent sur deux familles de titres :
+
+```
+« Pékin et Washington reprennent langue »            aucun mot-clé ne tombe
+« Nouvelle frégate pour la marine indonésienne »     « def » et « eco » à égalité
+```
+
+**Un modèle de langage peut prendre le relais, là et seulement là.** Il est **désactivé par
+défaut** : sans `config/ia.json` actif, rien ne part sur le réseau et le collecteur se
+comporte exactement comme avant.
+
+```bash
+export MAP_IA_CLE="..."              # jamais dans le fichier : il est suivi par Git
+# puis « actif: true » dans config/ia.json
+uv run collecteur/collect.py
+uv run collecteur/admin.py ia        # ce que le modèle a classé, et son état
+uv run collecteur/collect.py --sans-ia   # une collecte sans l'appeler
+```
+
+Cinq services sont préréglés dans le fichier, tous en dialecte « chat completions »
+d'OpenAI : **Groq**, **Mistral**, **OpenRouter**, **Google Gemini**, et **Ollama** en local.
+Ollama est le seul vraiment gratuit et le seul où rien ne sort du serveur : c'est le choix à
+préférer sur un VPS qui a la mémoire pour. Les quotas et les noms de modèles des autres
+changent souvent — les vérifier chez le fournisseur avant de s'y fier.
+
+`quand` règle le déclenchement : `doute` (défaut : aucun thème trouvé **ou** deux thèmes à
+égalité), `manquant` (seulement quand rien n'a été trouvé), `tout` (chaque article, coûteux).
+
+Cinq garde-fous, tous nécessaires :
+
+| | |
+|---|---|
+| **Cache obligatoire** | Un titre soumis une fois ne l'est jamais deux, même après redémarrage (table `themes_ia`). Changer de modèle ou de liste de thèmes invalide les entrées : la question n'est plus la même. Les réponses négatives sont mémorisées aussi. |
+| **Budget par collecte** | `max_par_collecte` appels au plus, et une limite de débit. Une offre gratuite se consomme vite. |
+| **Jamais bloquant** | Panne, délai dépassé, quota épuisé, réponse incompréhensible : on garde ce que les mots-clés ont trouvé. Après trois échecs d'affilée le modèle n'est plus appelé de la collecte, comme le disjoncteur des sources. Une panne n'est **pas** mise en cache. |
+| **Ce qui part** | Le titre et les 400 premiers caractères du résumé. Jamais l'article entier (C03). |
+| **Ce qui revient** | Un code de thème de la liste active, ou rien. Toute autre réponse est jetée — y compris une réponse approchante : « defense » n'est pas `def`. |
+
+Le dernier point est une mesure de sécurité, pas une coquetterie : le titre soumis vient d'un
+flux, donc d'un tiers, et peut contenir une phrase qui ressemble à une consigne. Comme la
+seule sortie acceptée est un code de la liste, le pire qu'un flux hostile puisse obtenir est
+un mauvais classement d'un de ses propres articles — ce qu'il pouvait déjà faire en
+choisissant ses mots.
+
+Un article classé par le modèle est marqué (`articles.theme_ia`) : `admin.py ia` les liste, et
+`admin.py classer` corrige à la main ce qui est faux. **Un article classé à la main n'est plus
+jamais modifié**, ni par les mots-clés ni par le modèle.
 
 ## Comment un article arrive sur la carte
 
@@ -248,15 +337,16 @@ projet ; le filtre par langue est la façon de n'en voir qu'un.
 ## La base de données
 
 `donnees/map.sqlite` est créée au premier lancement et migrée automatiquement. Le schéma est
-dans `collecteur/base.py` (version 12).
+dans `collecteur/base.py` (version 13).
 
 | Table ou vue | Contenu |
 |---|---|
-| `articles` | Titre, source, date, lien, zone, thème, **langue**, **position**, événement, correction manuelle, masquage |
+| `articles` | Titre, source, date, lien, zone, thème (et s'il vient du modèle), **langue**, **position**, événement, correction manuelle, masquage |
 | `evenements` | Un fait = une ligne : titre, lieu, position, période, nombre de sources publiables, langues présentes |
 | `themes`, `zones` | Référentiels. `themes` vient de `config/themes.json` |
 | `sources` | Les sources : état du cache conditionnel, disjoncteur, langue, fréquence, origine |
 | `lieux_geocodes` | Cache de géocodage, succès et échecs |
+| `themes_ia` | Cache du classement par modèle de langage : un titre n'est soumis qu'une fois |
 | `collectes`, `collectes_sources` | Journal de chaque passage, source par source |
 | `fil` (vue) | Les articles publiables : zone **et** thème connus, non masqués |
 | `a_trier` (vue) | Les articles que le tri n'a pas su classer |
@@ -267,6 +357,7 @@ Outil en ligne de commande :
 uv run collecteur/admin.py stats      # chiffres par zone et thème, dernières collectes
 uv run collecteur/admin.py config     # thèmes et sources tels que la configuration les a posés
 uv run collecteur/admin.py verifier-flux   # quelles sources répondent vraiment
+uv run collecteur/admin.py ia         # état du classement par modèle de langage
 uv run collecteur/admin.py a-trier    # articles non classés, avec leur numéro
 uv run collecteur/admin.py classer 42 asi def
 uv run collecteur/admin.py chercher "Taïwan"
@@ -355,6 +446,8 @@ fréquence ni la fin d'une mise en pause.
 | **XSS** — du HTML dans un flux | Les balises sont retirées à la collecte, et tout ce qui vient d'un flux repasse par un échappement à l'affichage |
 | **Liens piégés** | Seuls les liens `http(s)` entrent en base ; les liens externes portent `rel="noopener noreferrer"` |
 | **Mot de passe d'administration** | Variable d'environnement, comparaison à temps constant, HTTPS requis en production |
+| **Injection par un titre de flux** dans le modèle de langage | Seul un code de thème de la liste active est accepté en retour, et le modèle est averti que le texte soumis est une donnée. Le pire résultat possible est un mauvais classement. |
+| **Clé d'API du modèle** | Variable d'environnement, jamais dans `config/ia.json`, qui est suivi par Git. Le collecteur refuse de démarrer si le fichier est actif et la variable vide. |
 
 Le contrôle DNS est fait au moment de la requête et non à l'enregistrement : une panne de
 résolution ne doit pas empêcher d'ouvrir la base ni de sauvegarder une source valable.
@@ -452,9 +545,14 @@ Les thèmes ne sont plus codés en dur : voir `config/themes.json`.
 
 ## Points à valider (lot LT3)
 
-- **Les 16 adresses du thème `geo`, jamais testées** : lancer
-  `uv run collecteur/admin.py verifier-flux` et corriger ce qui ne répond pas.
-- Les adresses des autres flux et les conditions d'utilisation de chaque source (C03, C04).
+- **Les 41 adresses ajoutées pour `def` et `geo`, jamais testées** : lancer
+  `uv run collecteur/admin.py verifier-flux --decouvrir --ecrire` et corriger ou désactiver
+  ce qui ne répond toujours pas.
+- Les conditions d'utilisation de chaque source (C03, C04), et celles du fournisseur de
+  modèle si le classement par IA est activé.
+- **Le classement par IA sur des données réelles** : il n'a été vérifié que sur des réponses
+  simulées. Après quelques jours, comparer `admin.py ia` et `admin.py a-trier` pour savoir
+  s'il apporte quelque chose, et avec quel taux d'erreur.
 - Les mots-clés : les enrichir à partir de `admin.py a-trier` après quelques jours.
 - Les cas limites de zones : la Turquie et le Soudan sont en Moyen-Orient et Afrique du Nord,
   le Groenland en Europe.
