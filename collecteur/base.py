@@ -86,14 +86,15 @@ THEMES = {t["code"]: t["nom"] for t in THEMES_DECLARES}
 THEMES_ACTIFS = [t["code"] for t in THEMES_DECLARES if t["actif"]]
 REGLES_THEMES = {t["code"]: t["mots_cles"] for t in THEMES_DECLARES}
 
-VERSION_SCHEMA = 12  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+VERSION_SCHEMA = 13  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
                     # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs,
                     # pause_jusqu_a ; v7 : themes.actif/ordre, sources.langue/frequence/theme/
                     # origine ; v8 : articles.lat/lon/lieu, table lieux_geocodes ;
                     # v9 : table evenements, articles.evenement_id ;
                     # v10 : index couvrant idx_evenements_fil ;
                     # v11 : articles.langue, evenements.langues ;
-                    # v12 : idx_evenements_carte porte aussi langues, lieu et titre
+                    # v12 : idx_evenements_carte porte aussi langues, lieu et titre ;
+                    # v13 : articles.theme_ia, table themes_ia
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -183,6 +184,17 @@ CREATE TABLE IF NOT EXISTS evenements (
 -- v8 : cache de géocodage. Les conditions d'usage de Nominatim l'imposent, et de toute
 -- façon un lieu ne doit jamais être demandé deux fois. Les échecs sont mémorisés aussi,
 -- sans quoi les mêmes introuvables repartiraient à chaque collecte.
+-- v13 : cache du classement par modèle de langage. Même règle que pour le géocodage :
+-- une question posée une fois ne doit jamais être reposée. La clé contient le modèle et la
+-- liste des thèmes, parce qu'en changer change la question.
+CREATE TABLE IF NOT EXISTS themes_ia (
+    cle     TEXT PRIMARY KEY,   -- empreinte du titre normalisé, du modèle et des thèmes
+    titre   TEXT NOT NULL,      -- gardé pour pouvoir relire ce qui a été soumis
+    theme   TEXT,               -- NULL = le modèle n'a pas su classer
+    modele  TEXT NOT NULL,
+    ajout   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lieux_geocodes (
     cle          TEXT PRIMARY KEY,   -- nom normalisé (minuscules, sans accents)
     nom          TEXT NOT NULL,      -- nom renvoyé par le service
@@ -312,7 +324,8 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
             for nom, definition in (("lat", "REAL"), ("lon", "REAL"),                  # v8
                                     ("lieu", "TEXT"), ("lieu_origine", "TEXT"),
                                     ("evenement_id", "INTEGER REFERENCES evenements(id)"),  # v9
-                                    ("langue", "TEXT NOT NULL DEFAULT 'fr'")):          # v11
+                                    ("langue", "TEXT NOT NULL DEFAULT 'fr'"),          # v11
+                                    ("theme_ia", "INTEGER NOT NULL DEFAULT 0")):      # v13
                 if nom not in colonnes:
                     cx.execute(f"ALTER TABLE articles ADD COLUMN {nom} {definition}")
             if "langues" not in {r["name"] for r in cx.execute("PRAGMA table_info(evenements)")}:
@@ -641,12 +654,12 @@ def enregistrer(cx, a: dict, titre_norm: str, maintenant: datetime, collecte_id:
     cx.execute(
         """INSERT INTO articles (lien, titre, titre_norm, source, date_pub, zone, theme,
                                  ajout, maj, collecte_id, lat, lon, lieu, lieu_origine,
-                                 evenement_id, langue)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                 evenement_id, langue, theme_ia)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (a["lien"], a["titre"], titre_norm, a["source"], date.isoformat(),
          a["zone"], a["theme"], maintenant.isoformat(), maintenant.isoformat(), collecte_id,
          a.get("lat"), a.get("lon"), a.get("lieu"), a.get("lieu_origine"), evenement_id,
-         a.get("langue") or "fr"))
+         a.get("langue") or "fr", 1 if a.get("theme_ia") else 0))
     rafraichir_evenement(cx, evenement_id)
     return "nouveau" if premier else "regroupe"
 

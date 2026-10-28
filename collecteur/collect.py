@@ -49,6 +49,7 @@ from pathlib import Path
 import feedparser
 
 import base    # stockage SQLite (collecteur/base.py)
+import ia      # classement des thèmes par un modèle de langage (collecteur/ia.py)
 import lieux   # extraction des lieux et géocodage (collecteur/lieux.py)
 
 RACINE = Path(__file__).resolve().parent.parent
@@ -157,14 +158,39 @@ def _balayer(texte: str, tables: dict, poids: int, scores: dict, premiere: dict,
                 premiere[cat] = pos
 
 
-def classer(titre: str, resume: str, tables: dict):
-    """Catégorie qui a le plus de points (titre x3, résumé x1), ou None."""
+def classer_scores(titre: str, resume: str, tables: dict) -> tuple:
+    """Points par catégorie (titre x3, résumé x1) et position du premier mot-clé de chacune."""
     scores, premiere = {}, {}
     _balayer(normaliser(titre), tables, POIDS_TITRE, scores, premiere, True)
     _balayer(normaliser(resume), tables, POIDS_RESUME, scores, premiere, False)
+    return scores, premiere
+
+
+def meilleur(scores: dict, premiere: dict):
+    """Catégorie qui a le plus de points, le mot-clé le plus tôt dans le titre départageant."""
     if not scores:
         return None
     return sorted(scores, key=lambda c: (-scores[c], premiere.get(c, 10**6)))[0]
+
+
+def classer(titre: str, resume: str, tables: dict):
+    """Catégorie qui a le plus de points (titre x3, résumé x1), ou None."""
+    return meilleur(*classer_scores(titre, resume, tables))
+
+
+# Écart en deçà duquel deux thèmes sont considérés à égalité : un seul mot-clé de résumé
+# les sépare, ce qui ne suffit pas à trancher. C'est le cas que le modèle de langage sait
+# mieux traiter que des mots-clés — « Nouvelle frégate pour la marine indonésienne » touche
+# « def » et « eco » presque autant l'un que l'autre.
+MARGE_HESITATION = POIDS_RESUME
+
+
+def theme_hesitant(scores: dict) -> bool:
+    """Vrai quand les mots-clés n'ont rien trouvé, ou quand les deux premiers se tiennent."""
+    if not scores:
+        return True
+    points = sorted(scores.values(), reverse=True)
+    return len(points) > 1 and points[0] - points[1] <= MARGE_HESITATION
 
 
 # ======================================================================
@@ -614,8 +640,33 @@ def collecter_source(s: dict, hors_ligne: bool, ref: dict, entetes: dict = None)
 def trier(a: dict, ref: dict) -> dict:
     """Étape 3 : zone et thème (ceux fournis par l'API d'abord, puis les mots-clés)."""
     a["zone"] = a["zone"] or classer(a["titre"], a["resume"], ref["zones"])
-    a["theme"] = a["theme"] or classer(a["titre"], a["resume"], ref["themes"]) or a["indice_theme"]
+    if not a["theme"]:
+        scores, premiere = classer_scores(a["titre"], a["resume"], ref["themes"])
+        a["theme"] = meilleur(scores, premiere) or a["indice_theme"]
+        a["scores_theme"] = scores   # gardé pour savoir si le tri a hésité (voir ia.py)
     return a
+
+
+def completer_theme(cx, a: dict, classificateur, quand: str, rubriques: dict,
+                    maintenant: datetime) -> bool:
+    """Demande son thème au modèle de langage quand les mots-clés n'ont pas tranché.
+
+    Renvoie vrai si le modèle a changé quelque chose. Un thème imposé par la source n'est
+    jamais remis en cause : le flux sait mieux que quiconque ce qu'il publie.
+    """
+    if not classificateur or a.get("theme_force"):
+        return False
+    avant = a.get("theme")
+    if quand == "manquant" and avant:
+        return False
+    if quand == "doute" and avant and not theme_hesitant(a.get("scores_theme")):
+        return False
+    theme = ia.classer_avec_cache(cx, a["titre"], normaliser(a["titre"]), a["resume"],
+                                  rubriques, classificateur, maintenant)
+    if not theme or theme == avant:
+        return False
+    a["theme"], a["theme_ia"] = theme, True
+    return True
 
 
 def zone_du_lieu(a: dict, trouve: dict, ref: dict):
@@ -721,6 +772,7 @@ def collecter_toutes(cx, collecte: int, ref: dict, hors_ligne: bool, parallele: 
                 if s.get("theme_impose"):        # flux thématique : le thème ne se devine pas
                     for a in lot:
                         a["theme"] = a["theme"] or s["theme_impose"]
+                        a["theme_force"] = True
                 for a in lot:
                     a["langue"] = s.get("langue", "fr")
                 bruts += lot
@@ -753,6 +805,8 @@ def main(argv=None):
     ap.add_argument("--forcer", action="store_true",
                     help="interroge toutes les sources actives sans tenir compte de leur "
                          "fréquence de rafraîchissement ni du disjoncteur")
+    ap.add_argument("--sans-ia", action="store_true",
+                    help="ne pas appeler le modèle de langage, même si config/ia.json est actif")
     ap.add_argument("--parallele", type=int, default=PARALLELE, metavar="N",
                     help=f"sources interrogées en même temps (défaut : {PARALLELE}, "
                          "une seule à la fois par domaine)")
@@ -788,11 +842,18 @@ def main(argv=None):
     compte = {"nouveau": 0, "regroupe": 0, "maj": 0, "inchange": 0, "ancien": 0}
     gaz = lieux.charger_gazetteer()
     geocodeur = lieux.charger_geocodeur()
-    situes = 0
+    classificateur = None if args.sans_ia else ia.charger_classificateur()
+    quand = ia.quand_demander() if classificateur else "doute"
+    rubriques = ia.rubriques(base.THEMES_DECLARES) if classificateur else {}
+    if classificateur:
+        print(f"Classement par IA : {classificateur.modele}, au plus "
+              f"{classificateur.budget} appels, déclenché « {quand} ».")
+    situes = par_ia = 0
     for a in bruts:
         if not a["titre"] or not a["lien"].startswith("http"):
             continue
         trier(a, ref)
+        par_ia += completer_theme(cx, a, classificateur, quand, rubriques, MAINTENANT)
         situer(a, gaz, cx, geocodeur, ref)
         situes += a.get("lat") is not None
         compte[base.enregistrer(cx, a, normaliser(a["titre"]), MAINTENANT, collecte)] += 1
@@ -809,6 +870,14 @@ def main(argv=None):
           f"à un événement déjà connu, {compte['ancien']} trop anciens ignorés.")
     print(f"Événements : {evenements} au total "
           f"(un événement = un point sur la carte, avec toutes ses sources).")
+    if classificateur and classificateur.appels:
+        reste = "budget épuisé" if classificateur.budget <= 0 else f"{classificateur.budget} restants"
+        print(f"IA   : {classificateur.appels} appels ({reste}), {par_ia} thèmes corrigés, "
+              f"{classificateur.echecs} échecs.")
+        if classificateur.derniere_erreur:
+            print(f"       dernière erreur : {classificateur.derniere_erreur}")
+    elif classificateur:
+        print("IA   : aucun appel — les mots-clés ont suffi, ou tout était déjà en cache.")
     if bruts:
         print(f"Carte : {situes} articles sur {len(bruts)} placés "
               f"({100 * situes / len(bruts):.0f} %) ; les autres restent dans la liste.")
