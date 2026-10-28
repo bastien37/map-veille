@@ -59,6 +59,9 @@ def connexion_ecriture():
         cx.close()
 
 
+SANS_ZONE = "_"   # clé de la ligne « sans zone » du tableau croisé
+
+
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
@@ -74,10 +77,14 @@ def page_admin(_: str = Depends(administrateur)):
 def tableau(_: str = Depends(administrateur), cx=Depends(connexion_ecriture)):
     limite = (base.maintenant_utc() - base.DUREE_FIL).isoformat()
     un = lambda sql, *p: cx.execute(sql, p).fetchone()[0]   # noqa: E731
-    croise = {z: {t: 0 for t in base.THEMES} for z in base.ZONES}
+    # Depuis que D04 n'exige plus de zone pour un flux à thème imposé, « fil » contient des
+    # articles sans zone : il leur faut une ligne, sinon ils manquent au tableau — et avant
+    # cette ligne, croise[None] levait une KeyError et l'administration rendait 500.
+    zones = {**base.ZONES, SANS_ZONE: "(sans zone)"}
+    croise = {z: {t: 0 for t in base.THEMES} for z in zones}
     for r in cx.execute("SELECT zone, theme, COUNT(*) n FROM fil WHERE date_pub >= ? GROUP BY zone, theme",
                         (limite,)):
-        croise[r["zone"]][r["theme"]] = r["n"]
+        croise.setdefault(r["zone"] or SANS_ZONE, {})[r["theme"]] = r["n"]
     sources = [dict(r) for r in cx.execute(
         """SELECT source, COUNT(*) AS total, SUM(date_pub >= ?) AS recents, MAX(date_pub) AS dernier
            FROM articles WHERE masque = 0 GROUP BY source ORDER BY recents DESC, total DESC LIMIT 25""",
@@ -90,10 +97,38 @@ def tableau(_: str = Depends(administrateur), cx=Depends(connexion_ecriture)):
             "manuels": un("SELECT COUNT(*) FROM articles WHERE manuel = 1"),
             "masques": un("SELECT COUNT(*) FROM articles WHERE masque = 1"),
         },
-        "zones": base.ZONES, "themes": base.THEMES,
+        "zones": zones, "themes": base.THEMES,
         "croise": croise,
         "sources": sources,
+        "ia": etat_ia(cx),
     }
+
+
+def etat_ia(cx) -> dict:
+    """Pourquoi il y a — ou n'y a pas — de résumé sur le site.
+
+    Sans cela l'absence de récapitulatif est muette : rien ne distingue « le modèle est
+    éteint » de « il est allumé mais n'a encore rien écrit » ni de « il échoue ». La
+    question se pose depuis un navigateur, la réponse doit y être aussi.
+    """
+    import ia as moteur
+    etat = {"classement": False, "recap": False, "modele": None, "erreur": None,
+            "titres_soumis": 0, "articles_classes": 0, "dernier_recap": None, "recaps": 0}
+    try:
+        classificateur = moteur.charger_classificateur()
+        etat["classement"] = classificateur is not None
+        etat["modele"] = classificateur.modele if classificateur else None
+        etat["recap"] = bool(classificateur) and moteur.reglages_recap()["actif"]
+    except ValueError as e:
+        etat["erreur"] = str(e)
+    etat["titres_soumis"] = cx.execute("SELECT COUNT(*) FROM themes_ia").fetchone()[0]
+    etat["articles_classes"] = cx.execute(
+        "SELECT COUNT(*) FROM articles WHERE theme_ia = 1").fetchone()[0]
+    ligne = cx.execute("SELECT jour, COUNT(*) n FROM recaps GROUP BY jour "
+                       "ORDER BY jour DESC LIMIT 1").fetchone()
+    if ligne:
+        etat["dernier_recap"], etat["recaps"] = ligne["jour"], ligne["n"]
+    return etat
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +140,11 @@ def articles(statut: str = Query("tous", pattern="^(tous|a_trier|publies|masques
              limite: int = Query(50, ge=1, le=200), decalage: int = Query(0, ge=0),
              _: str = Depends(administrateur), cx=Depends(connexion_ecriture)):
     clauses, params = [], []
-    clauses.append({"tous": "1", "a_trier": "(zone IS NULL OR theme IS NULL) AND masque = 0",
-                    "publies": "zone IS NOT NULL AND theme IS NOT NULL AND masque = 0",
+    # mêmes conditions que les vues « fil » et « a_trier » : l'administration doit montrer
+    # exactement ce que le site diffuse, sinon « à trier » liste des articles déjà publiés
+    clauses.append({"tous": "1",
+                    "a_trier": f"NOT ({base.PUBLIABLE}) AND masque = 0",
+                    "publies": f"{base.PUBLIABLE} AND masque = 0",
                     "masques": "masque = 1", "manuels": "manuel = 1"}[statut])
     if q:
         from collect import normaliser

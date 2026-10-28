@@ -140,6 +140,7 @@ form.fiche textarea{min-height:56px;resize:vertical}
   <section id="v-tableau" role="tabpanel" aria-labelledby="t-tableau">
     <div style="display:flex;flex-direction:column;gap:16px">
       <div class="tiles" id="tuiles"></div>
+      <div class="panel" id="p-ia"></div>
       <div class="grille2">
         <div class="panel">
           <h2>Articles visibles sur le site, 30 derniers jours</h2>
@@ -268,9 +269,45 @@ async function chargerTableau(){
       Object.entries(d.croise).map(([z,l])=>{const tot=Object.values(l).reduce((a,b)=>a+b,0);
         return `<tr><td>${esc(ZONES[z])}</td>${th.map(t=>{const n=l[t];return `<td class="n ${n?"h"+Math.ceil(4*n/max):""}">${n||""}</td>`}).join("")}<td class="n"><b>${tot}</b></td></tr>`}).join("")+
       `</tbody>`;
+    dessinerIa(d.ia);
     $("#sources").innerHTML=`<thead><tr><th>Source</th><th class="n">30 j</th><th class="n">Total</th><th>Dernier article</th></tr></thead><tbody>`+
       d.sources.map(s=>`<tr><td>${esc(s.source)}</td><td class="n">${s.recents}</td><td class="n">${s.total}</td><td class="mono" style="font-size:.78rem">${fmt(s.dernier)}</td></tr>`).join("")+`</tbody>`;
   }catch(e){toast(e.message,true)}
+}
+
+// ---------- état du modèle de langage ----------
+// L'absence de résumé sur le site est muette par construction : le bloc reste caché tant
+// qu'il n'y a rien à montrer. Ici, au contraire, il faut dire pourquoi.
+function dessinerIa(d){
+  if(!d)return;
+  const lignes=[];
+  if(d.erreur) lignes.push([`⚠ ${esc(d.erreur)}`, "alerte"]);
+  if(!d.classement){
+    lignes.push(["Classement des thèmes par IA : <b>inactif</b>. Les mots-clés de "
+      + "<code>config/themes.json</code> classent seuls.", ""]);
+    lignes.push(["Résumés quotidiens : <b>inactifs</b>, donc le bloc « Récapitulatif du "
+      + "jour » n'apparaît pas sur le site.", ""]);
+    lignes.push(["Pour les activer : mettre <code>actif</code> à <code>true</code> dans "
+      + "<code>config/ia.json</code>, <code>recap.actif</code> aussi, et renseigner la clé "
+      + "dans la variable d'environnement <code>MAP_IA_CLE</code> avant la collecte. "
+      + "Avec Ollama sur la machine, aucune clé n'est nécessaire.", "muted"]);
+  }else{
+    lignes.push([`Classement par IA : <b>actif</b> — modèle <code>${esc(d.modele||"?")}</code>.`, ""]);
+    lignes.push([`Résumés quotidiens : <b>${d.recap?"actifs":"inactifs"}</b>.`
+      + (d.recap?"":" Mettre <code>recap.actif</code> à <code>true</code> dans "
+          + "<code>config/ia.json</code> pour que le bloc apparaisse sur le site."), ""]);
+    if(d.recap && !d.dernier_recap)
+      lignes.push(["Aucun résumé écrit pour l'instant : il l'est à la fin d'une collecte. "
+        + "<code>uv run collecteur/admin.py recap</code> le force.", "muted"]);
+  }
+  if(d.dernier_recap)
+    lignes.push([`Dernier résumé : <b>${esc(d.dernier_recap)}</b>, ${d.recaps} thème`
+      + `${d.recaps>1?"s":""}.`, ""]);
+  lignes.push([`${d.titres_soumis} titre${d.titres_soumis>1?"s":""} soumis au modèle depuis `
+    + `le début, ${d.articles_classes} article${d.articles_classes>1?"s":""} dont le thème `
+    + `vient de lui.`, "muted"]);
+  $("#p-ia").innerHTML=`<h2>Modèle de langage</h2>`
+    + lignes.map(([l,c])=>`<p class="${c}" style="margin:6px 0;font-size:.88rem">${l}</p>`).join("");
 }
 
 // ---------- listes d'articles (À trier et Articles) ----------

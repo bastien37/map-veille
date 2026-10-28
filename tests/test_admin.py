@@ -169,3 +169,81 @@ def test_connexion_utilisable_depuis_un_autre_thread(client):
     assert ouverte["cx"].execute("SELECT COUNT(*) FROM fil").fetchone()[0] > 0   # thread principal
     with pytest.raises(StopIteration):
         next(gen)   # fermeture depuis le thread principal
+
+
+# ---------- l'administration suit la règle de diffusion ----------
+def poser_sans_zone(chemin):
+    """Un article à thème imposé et sans lieu : le cas que D04 laisse passer depuis la v15."""
+    import base
+    cx = base.ouvrir(chemin)
+    base.enregistrer(cx, {"titre": "Avis de sécurité sans lieu",
+                          "lien": "https://cert.test/avis-1", "date": base.maintenant_utc(),
+                          "source": "CERT", "resume": "", "zone": None, "theme": "cyb",
+                          "langue": "fr", "theme_force": True},
+                     "avis de securite sans lieu", base.maintenant_utc(), None)
+    cx.commit()
+    cx.close()
+
+
+def test_le_tableau_de_bord_supporte_les_articles_sans_zone(client, tmp_path):
+    """Avant correction, croise[None] levait une KeyError et l'administration rendait 500."""
+    poser_sans_zone(tmp_path / "map.sqlite")
+    r = client.get("/api/admin/tableau", auth=AUTH)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["croise"][admin.SANS_ZONE]["cyb"] == 1
+    assert d["zones"][admin.SANS_ZONE] == "(sans zone)"
+    assert sum(sum(l.values()) for l in d["croise"].values()) == d["compteurs"]["fil"]
+
+
+def test_les_listes_suivent_exactement_les_vues(client, tmp_path):
+    """« À trier » ne doit pas lister un article que le site publie déjà."""
+    poser_sans_zone(tmp_path / "map.sqlite")
+    a_trier = client.get("/api/admin/articles", params={"statut": "a_trier"},
+                         auth=AUTH).json()["articles"]
+    publies = client.get("/api/admin/articles", params={"statut": "publies"},
+                         auth=AUTH).json()["articles"]
+    titres_publies = {a["titre"] for a in publies}
+    assert "Avis de sécurité sans lieu" in titres_publies
+    assert "Avis de sécurité sans lieu" not in {a["titre"] for a in a_trier}
+    d = client.get("/api/admin/tableau", auth=AUTH).json()
+    assert len(a_trier) == d["compteurs"]["a_trier"]
+
+
+# ---------- état du modèle de langage ----------
+def test_le_tableau_de_bord_dit_pourquoi_il_n_y_a_pas_de_resume(client):
+    """Le bloc du site reste caché quand il n'y a rien : l'administration doit, elle, parler."""
+    d = client.get("/api/admin/tableau", auth=AUTH).json()["ia"]
+    assert d["classement"] is False and d["recap"] is False
+    assert d["dernier_recap"] is None and d["erreur"] is None
+    assert d["titres_soumis"] == 0 and d["articles_classes"] == 0
+
+
+def test_l_etat_signale_une_configuration_cassee(client, monkeypatch, tmp_path):
+    """Clé manquante alors que le modèle est actif : c'est la cause la plus probable."""
+    import json
+    import base
+    fichier = tmp_path / "ia.json"
+    fichier.write_text(json.dumps({"actif": True, "url": "https://m.test/v1",
+                                   "modele": "m", "cle_env": "MA_CLE"}), encoding="utf-8")
+    monkeypatch.setattr(sys.modules["ia"], "IA_JSON", fichier)
+    monkeypatch.delenv("MA_CLE", raising=False)
+    d = client.get("/api/admin/tableau", auth=AUTH).json()["ia"]
+    assert "MA_CLE" in d["erreur"] and d["classement"] is False
+
+
+def test_l_etat_compte_les_resumes_ecrits(client, tmp_path):
+    import base
+    cx = base.ouvrir(tmp_path / "map.sqlite")
+    base.ecrire_recap(cx, "2026-10-28", "cyb", "Un résumé.", "modele-test", 3,
+                      base.maintenant_utc())
+    cx.commit()
+    cx.close()
+    d = client.get("/api/admin/tableau", auth=AUTH).json()["ia"]
+    assert d["dernier_recap"] == "2026-10-28" and d["recaps"] == 1
+
+
+def test_la_page_affiche_le_bloc(client):
+    page = client.get("/admin", auth=AUTH).text
+    assert 'id="p-ia"' in page and "dessinerIa" in page
+    assert "MAP_IA_CLE" in page, "la page doit dire comment l'activer"

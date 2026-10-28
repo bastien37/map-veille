@@ -344,8 +344,12 @@ uv run collecteur/admin.py recap --jour 2026-10-27
 uv run collecteur/admin.py recap --theme cyb --refaire
 ```
 
-Il est écrit **à la collecte** et rangé en base (`"recap": {"actif": true}` dans
-`config/ia.json`). Afficher la page ne déclenche jamais d'appel à un service extérieur : ce
+Il est écrit **à la collecte** et rangé en base. Il faut pour cela **deux interrupteurs**
+dans `config/ia.json` — `"actif": true` et `"recap": {"actif": true}` — et une clé dans
+`MAP_IA_CLE`, ou Ollama sur la machine, qui n'en demande aucune. Tant que ce n'est pas fait,
+le bloc n'apparaît pas du tout sur le site : il reste caché plutôt que d'afficher une boîte
+vide. **Le tableau de bord de `/admin` dit où en est le modèle** — inactif, actif mais sans
+résumé écrit, ou en erreur — parce que l'absence de bloc, elle, ne dit rien. Afficher la page ne déclenche jamais d'appel à un service extérieur : ce
 serait un appel par visiteur, et le texte serait différent à chaque rechargement. Sans
 modèle configuré, `admin.py recap` reste utile — il affiche ce qui est déjà en base.
 
@@ -545,6 +549,11 @@ uv run uvicorn serveur.app:app --reload
 
 Le mot de passe n'est jamais écrit dans le code ni dans Git. **En production, servir le site
 en HTTPS** : en HTTP simple, le mot de passe circule en clair.
+
+Le tableau de bord porte un encadré **Modèle de langage** : s'il est actif, avec quel
+modèle, si les résumés quotidiens le sont aussi, la date du dernier écrit, et la marche à
+suivre quand ils sont éteints. C'est là qu'il faut regarder quand le récapitulatif
+n'apparaît pas sur le site.
 
 Cinq onglets : tableau de bord, articles à trier, recherche et reclassement, sources (avec
 leur dernier passage, leur disjoncteur et un bouton « Tester sans enregistrer »), et journal
