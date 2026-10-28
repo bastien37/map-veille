@@ -501,6 +501,26 @@ fréquence ni la fin d'une mise en pause.
 Le contrôle DNS est fait au moment de la requête et non à l'enregistrement : une panne de
 résolution ne doit pas empêcher d'ouvrir la base ni de sauvegarder une source valable.
 
+### Si le serveur sort par un proxy HTTP
+
+Une machine derrière un proxy n'ouvre pas la connexion elle-même : elle la demande au proxy,
+qui résout le nom à sa place. Elle n'a alors souvent **aucun DNS**, et le contrôle par
+adresse IP échoue pour tous les flux — la collecte s'arrête avant d'avoir commencé, sur
+« nom de machine introuvable ». L'adresse que le collecteur résoudrait ne serait de toute
+façon pas celle qui est jointe.
+
+```bash
+MAP_PROXY_RESOUT_LES_NOMS=1 uv run collecteur/collect.py
+```
+
+Ce réglage est **fermé par défaut**, et c'est voulu : mieux vaut une collecte qui échoue
+visiblement qu'un contrôle retiré en silence. L'ouvrir est une décision d'exploitation —
+la politique de sortie devient celle du proxy, à qui il revient de refuser le réseau
+interne. Les contrôles de forme, eux, s'appliquent dans tous les cas : `169.254.169.254`,
+`10.0.0.1`, `localhost` et tout schéma autre que `http(s)` sont refusés avant d'atteindre
+le proxy, et une redirection reste vérifiée. Un hôte listé dans `no_proxy` est joint en
+direct : le contrôle DNS s'y applique normalement.
+
 ## Mise en ligne
 
 Il faut un serveur qui exécute Python (GitHub Pages ne convient pas) :

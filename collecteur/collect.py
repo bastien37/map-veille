@@ -211,6 +211,19 @@ class AdresseRefusee(ValueError):
 # résolues — et de nouveau après chaque redirection, qu'un serveur distant contrôle.
 AUTORISER_RESEAU_LOCAL = os.environ.get("MAP_AUTORISER_RESEAU_LOCAL") == "1"
 
+# Cas particulier d'une machine qui sort par un proxy HTTP : elle n'ouvre pas la connexion
+# elle-même, elle la demande au proxy, et c'est LE PROXY qui résout le nom. Elle n'a alors
+# souvent aucun DNS, et « adresses_de() » échoue pour tous les flux — la collecte s'arrête
+# avant d'avoir commencé. L'adresse que nous résoudrions ne serait de toute façon pas celle
+# qui est jointe.
+#
+# Ce réglage reste donc FERMÉ par défaut : on préfère une collecte qui échoue visiblement à
+# un contrôle qu'on retire sans le dire. L'ouvrir est une décision d'exploitation, à prendre
+# en connaissance de cause : la politique de sortie devient celle du proxy, à qui il revient
+# de refuser le réseau interne. Les contrôles de forme, eux, s'appliquent dans tous les cas
+# — « http://169.254.169.254/… » et « http://10.0.0.1/… » sont refusés avant le proxy.
+PROXY_RESOUT_LES_NOMS = os.environ.get("MAP_PROXY_RESOUT_LES_NOMS") == "1"
+
 
 def adresses_de(hote: str) -> set:
     infos = socket.getaddrinfo(hote, None, proto=socket.IPPROTO_TCP)
@@ -246,6 +259,21 @@ def verifier_forme_url(url: str, autoriser_local: bool = None):
                              "Un flux doit être servi par une machine publique.")
 
 
+def via_proxy(url: str) -> bool:
+    """Vrai si cette requête-ci passera par un proxy HTTP, qui résoudra le nom à sa place.
+
+    Un hôte listé dans no_proxy est joint en direct : le contrôle par adresse IP s'applique
+    alors normalement, ce qui est ce qu'on veut pour 127.0.0.1 et le réseau de la machine.
+    """
+    d = urllib.parse.urlsplit(url or "")
+    if d.scheme not in urllib.request.getproxies():
+        return False
+    try:
+        return not urllib.request.proxy_bypass(d.hostname or "")
+    except Exception:
+        return True
+
+
 def verifier_url(url: str, autoriser_local: bool = None):
     """Contrôle complet, appliqué juste avant d'ouvrir la connexion : la forme, puis les
     adresses IP réellement résolues. C'est ici que la vérification compte, car un nom peut
@@ -255,6 +283,8 @@ def verifier_url(url: str, autoriser_local: bool = None):
     verifier_forme_url(url, autoriser_local)
     if autoriser_local:
         return
+    if PROXY_RESOUT_LES_NOMS and via_proxy(url):
+        return      # contrôle délégué au proxy, sur décision explicite de l'exploitant
     hote = urllib.parse.urlparse(url).hostname
     try:
         adresses = adresses_de(hote)

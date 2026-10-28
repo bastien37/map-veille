@@ -156,3 +156,73 @@ def test_le_front_echappe_tout_ce_qui_vient_des_flux():
         assert champ in carte
     # les liens externes ne doivent pas donner la main à la page d'origine
     assert 'rel="noopener' in page and 'rel="noopener noreferrer"' in carte
+
+
+# ---------- sortie par un proxy HTTP ----------
+# Une machine qui sort par un proxy ne résout pas les noms elle-même et n'a souvent aucun
+# DNS. Le contrôle par adresse IP y est alors impossible. L'interrupteur qui le délègue au
+# proxy doit rester fermé par défaut, et ne jamais lever les contrôles de forme.
+@pytest.fixture
+def derriere_un_proxy(monkeypatch):
+    monkeypatch.setattr(collect.urllib.request, "getproxies",
+                        lambda: {"http": "http://127.0.0.1:3128",
+                                 "https": "http://127.0.0.1:3128"})
+    monkeypatch.setattr(collect.urllib.request, "proxy_bypass",
+                        lambda hote: hote in ("127.0.0.1", "localhost"))
+
+
+def test_via_proxy_distingue_ce_qui_passe_par_le_proxy(derriere_un_proxy):
+    assert collect.via_proxy("https://exemple.test/rss") is True
+    assert collect.via_proxy("http://127.0.0.1:8000/x") is False   # dans no_proxy
+    assert collect.via_proxy("ftp://exemple.test/x") is False
+
+
+def test_sans_proxy_rien_ne_change(sans_reseau_local, monkeypatch):
+    monkeypatch.setattr(collect.urllib.request, "getproxies", dict)
+    monkeypatch.setattr(collect, "PROXY_RESOUT_LES_NOMS", True)
+    with pytest.raises(collect.AdresseRefusee, match="introuvable"):
+        collect.verifier_url("https://ce-nom-nexiste-vraiment-pas.invalid/rss")
+
+
+def test_l_interrupteur_est_ferme_par_defaut(sans_reseau_local, derriere_un_proxy):
+    """Sans décision explicite de l'exploitant, le contrôle DNS s'applique — quitte à
+    faire échouer visiblement la collecte, ce qui vaut mieux qu'un contrôle retiré en
+    silence."""
+    assert collect.PROXY_RESOUT_LES_NOMS is False
+    with pytest.raises(collect.AdresseRefusee, match="introuvable"):
+        collect.verifier_url("https://ce-nom-nexiste-vraiment-pas.invalid/rss")
+
+
+def test_l_interrupteur_ouvert_delegue_la_resolution(sans_reseau_local, derriere_un_proxy,
+                                                     monkeypatch):
+    def interdit(hote):
+        raise AssertionError("le DNS ne doit plus être interrogé derrière le proxy")
+    monkeypatch.setattr(collect, "adresses_de", interdit)
+    monkeypatch.setattr(collect, "PROXY_RESOUT_LES_NOMS", True)
+    collect.verifier_url("https://ce-nom-nexiste-vraiment-pas.invalid/rss")
+
+
+@pytest.mark.parametrize("url", [
+    "http://169.254.169.254/latest/meta-data/",
+    "http://10.0.0.1/interne",
+    "http://127.0.0.1:8000/api/admin/tableau",
+    "http://localhost/secret",
+    "file:///etc/passwd",
+    "gopher://exemple.test/x",
+])
+def test_les_controles_de_forme_tiennent_meme_derriere_le_proxy(url, sans_reseau_local,
+                                                                derriere_un_proxy,
+                                                                monkeypatch):
+    """Une adresse interne écrite en clair est refusée avant même d'atteindre le proxy."""
+    monkeypatch.setattr(collect, "PROXY_RESOUT_LES_NOMS", True)
+    with pytest.raises(collect.AdresseRefusee):
+        collect.verifier_url(url)
+
+
+def test_une_redirection_reste_verifiee_derriere_le_proxy(sans_reseau_local,
+                                                          derriere_un_proxy, monkeypatch):
+    """Le proxy ne dispense pas de revérifier ce que le serveur distant propose."""
+    monkeypatch.setattr(collect, "PROXY_RESOUT_LES_NOMS", True)
+    with pytest.raises(collect.AdresseRefusee):
+        collect._RedirectionsVerifiees().redirect_request(
+            None, None, 302, "Found", {}, "http://169.254.169.254/latest/")
