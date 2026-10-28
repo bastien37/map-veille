@@ -160,7 +160,7 @@ def recharger_themes_si_modifies() -> bool:
         _empreinte_chargee = empreinte
         return True
 
-VERSION_SCHEMA = 15  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+VERSION_SCHEMA = 17  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
                     # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs,
                     # pause_jusqu_a ; v7 : themes.actif/ordre, sources.langue/frequence/theme/
                     # origine ; v8 : articles.lat/lon/lieu, table lieux_geocodes ;
@@ -170,7 +170,9 @@ VERSION_SCHEMA = 15  # v2 : articles.masque ; v3 : table sources ; v4 : collecte
                     # v12 : idx_evenements_carte porte aussi langues, lieu et titre ;
                     # v13 : articles.theme_ia, table themes_ia ;
                     # v14 : table recaps ;
-                    # v15 : articles.theme_force, D04 assoupli (voir PUBLIABLE)
+                    # v15 : articles.theme_force, D04 assoupli (voir PUBLIABLE) ;
+                    # v16 : lieux de pays réécrits en français ;
+                    # v17 : villes aussi (exonymes.json, section « affichage »)
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -407,6 +409,7 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
     cx.execute("BEGIN IMMEDIATE")             # prend le verrou d'écriture d'un coup, puis attend s'il est pris
     try:
         if not a_jour(cx):                    # un autre programme a pu migrer pendant l'attente
+            version_avant = cx.execute("PRAGMA user_version").fetchone()[0]
             for instruction in _instructions(SCHEMA):
                 cx.execute(instruction)
             colonnes = {r["name"] for r in cx.execute("PRAGMA table_info(articles)")}
@@ -455,6 +458,9 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
                 cx.execute("UPDATE articles SET theme_force = 1 WHERE theme IS NOT NULL "
                            "AND source IN (SELECT nom FROM sources "
                            "               WHERE theme_impose IS NOT NULL)")
+            if 0 < version_avant < 17:
+                renommer_les_lieux_en_francais(cx)
+                oublier_les_faux_lieux(cx)
             cx.execute(f"PRAGMA user_version = {VERSION_SCHEMA}")
         cx.commit()
     except Exception:
@@ -839,6 +845,58 @@ def ecrire_recap(cx, jour: str, theme: str, texte: str, modele: str, nb: int,
     cx.execute("INSERT OR REPLACE INTO recaps (jour, theme, texte, modele, nb_articles, maj) "
                "VALUES (?, ?, ?, ?, ?, ?)",
                (jour, theme, texte[:TAILLE_MAX_RECAP], modele, nb, maintenant.isoformat()))
+
+
+def renommer_les_lieux_en_francais(cx) -> int:
+    """v16 et v17 : « Spain » devient « Espagne », « Beijing » devient « Pékin ».
+
+    Le gazetteer vient de GeoNames et nomme tout en anglais ; l'affichage prend désormais
+    le nom français, des pays (collecteur/pays.json) comme des villes qui en ont un courant
+    (config/exonymes.json, section « affichage »). Un article déjà connu n'étant jamais
+    réécrit par la collecte, sans ce rattrapage « Spain » resterait affiché à côté
+    d'« Espagne » pendant un mois.
+    """
+    import lieux   # tardif : le gazetteer ne doit pas être chargé à chaque ouverture
+    try:
+        renommages = lieux.renommages()
+    except (OSError, ValueError):
+        return 0
+    n = 0
+    for anglais, francais in renommages.items():
+        for table in ("articles", "evenements"):
+            n += cx.execute(f"UPDATE {table} SET lieu = ? WHERE lieu = ?",
+                            (francais, anglais)).rowcount
+    return n
+
+
+def oublier_les_faux_lieux(cx) -> int:
+    """Déplace hors de la carte les articles placés sur un lieu désormais écarté.
+
+    « Lockheed Martin » plaçait des articles à Martin (Slovaquie), « Enterprise AI » à
+    Enterprise (Alabama), et le mot « cela » à Cela (Espagne). Ces noms ont rejoint
+    config/lieux_ignores.json, ce qui protège les collectes à venir — mais pas ce qui est
+    déjà en base, et un point faux reste un point faux pendant trente jours.
+
+    L'article et son événement perdent leur position, pas leur existence : ils restent dans
+    le fil, simplement plus sur la carte. Mieux vaut un article sans point qu'un point faux.
+    """
+    import lieux   # tardif : le gazetteer ne doit pas être chargé à chaque ouverture
+    try:
+        ignores = {lieux.normaliser(n) for n in
+                   json.loads(lieux.STOPLISTE.read_text(encoding="utf-8"))["ignores"]}
+    except (OSError, ValueError, KeyError):
+        return 0
+    faux = [r["lieu"] for r in cx.execute("SELECT DISTINCT lieu FROM articles "
+                                          "WHERE lieu IS NOT NULL")
+            if lieux.normaliser(r["lieu"]) in ignores]
+    if not faux:
+        return 0
+    trous = ",".join("?" * len(faux))
+    cx.execute(f"UPDATE evenements SET lieu = NULL, lat = NULL, lon = NULL "
+               f"WHERE lieu IN ({trous})", faux)
+    return cx.execute(
+        f"UPDATE articles SET lieu = NULL, lat = NULL, lon = NULL, lieu_origine = NULL "
+        f"WHERE lieu IN ({trous})", faux).rowcount
 
 
 def classer_a_la_main(cx, article_id: int, zone: str, theme: str, maintenant: datetime) -> bool:

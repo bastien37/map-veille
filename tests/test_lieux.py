@@ -29,7 +29,7 @@ def gaz():
 def test_gazetteer_charge(gaz):
     assert len(gaz["index"]) > 10_000
     assert gaz["index"]["france"][0]["t"] == "pays"
-    assert gaz["index"]["londres"][0]["n"] == "London"
+    assert gaz["index"]["londres"][0]["n"] == "Londres"
     assert gaz["index"]["kharkiv"][0]["c"] == "UKR"
 
 
@@ -109,13 +109,13 @@ def test_precision_et_rappel_du_corpus(gaz):
 def test_un_nom_long_consomme_ses_mots(gaz):
     """« New Delhi » ne doit pas faire gagner « Delhi » au passage."""
     assert lieux.extraire("Inde : New Delhi suffoque", "", gaz)["nom"] == "New Delhi"
-    assert lieux.extraire("Attentat à New York", "", gaz)["nom"] == "New York City"
+    assert lieux.extraire("Attentat à New York", "", gaz)["nom"] == "New York"
 
 
 def test_minuscule_initiale_ignoree(gaz):
     """Sans la règle de la majuscule, « nice » ou « marche » placeraient des points partout."""
     assert lieux.extraire("réunion à bruxelles", "", gaz) is None
-    assert lieux.extraire("Réunion à Bruxelles", "", gaz)["nom"] == "Brussels"
+    assert lieux.extraire("Réunion à Bruxelles", "", gaz)["nom"] == "Bruxelles"
 
 
 def test_homonyme_le_plus_peuple_gagne(gaz):
@@ -132,7 +132,7 @@ def test_le_pays_cite_departage_les_homonymes(gaz):
 
 def test_une_ville_place_mieux_qu_un_pays(gaz):
     trouve = lieux.extraire("Allemagne : manifestation à Hambourg", "", gaz)
-    assert trouve["nom"] == "Hamburg" and trouve["type"] == "ville"
+    assert trouve["nom"] == "Hambourg" and trouve["type"] == "ville"
 
 
 def test_le_titre_pese_plus_que_le_resume(gaz):
@@ -244,7 +244,9 @@ def test_ordre_de_priorite(gaz, tmp_path):
 
     c = collect.article("Rapport humanitaire", "http://x/3", None, "src", lieu="Tchad")
     collect.situer(c, gaz)
-    assert c["lieu"] == "Chad" and c["lieu_origine"] == "gazetteer"
+    # le nom français est reconnu ET affiché : depuis la v16 les pays portent leur nom
+    # français, pris dans collecteur/pays.json
+    assert c["lieu"] == "Tchad" and c["lieu_origine"] == "gazetteer"
 
     d = collect.article("Rien de localisable", "http://x/4", None, "src")
     collect.situer(d, gaz)
@@ -306,3 +308,113 @@ def test_sans_referentiel_aucune_deduction(gaz):
     a = collect.article("Inondations à Lagos", "https://x.test/1", None, "src")
     collect.situer(a, gaz)
     assert a["lat"] is not None and a["zone"] is None
+
+
+# ---------- noms français ----------
+def test_les_pays_portent_leur_nom_francais(gaz):
+    """Le gazetteer vient de GeoNames, donc en anglais : « Spain » sous un article du
+    Monde détonne. Les 211 noms de collecteur/pays.json font autorité."""
+    for cle, attendu in [("spain", "Espagne"), ("south korea", "Corée du Sud"),
+                         ("united states", "États-Unis"), ("germany", "Allemagne")]:
+        assert gaz["index"][cle][0]["n"] == attendu
+
+
+def test_les_villes_prennent_leur_exonyme_francais(gaz):
+    for cle, attendu in [("beijing", "Pékin"), ("moscow", "Moscou"), ("london", "Londres"),
+                         ("cairo", "Le Caire"), ("new york city", "New York")]:
+        assert gaz["index"][cle][0]["n"] == attendu
+
+
+def test_les_formes_datees_ou_discutees_ne_sont_pas_affichees(gaz):
+    """La liste d'alias sert à RECONNAÎTRE et accepte « Kharkov », « Madras », « Kiev ».
+    La liste d'affichage, elle, est relue à la main et les écarte."""
+    for cle, attendu in [("kharkiv", "Kharkiv"), ("kharkov", "Kharkiv"),
+                         ("chennai", "Chennai"), ("madras", "Chennai"),
+                         ("mumbai", "Mumbai"), ("bombay", "Mumbai"),
+                         ("kyiv", "Kyiv"), ("kiev", "Kyiv")]:
+        assert gaz["index"][cle][0]["n"] == attendu, cle
+
+
+def test_les_variantes_d_ecriture_ne_remplacent_pas_le_nom(gaz):
+    """« Sao Paulo » est une graphie sans accents, pas un nom français."""
+    for cle, attendu in [("sao paulo", "São Paulo"), ("quebec", "Québec")]:
+        assert gaz["index"][cle][0]["n"] == attendu
+
+
+def test_les_faux_lieux_constates_en_production_sont_ignores(gaz):
+    """Relevés sur 1 372 dépêches réelles : « Lockheed Martin », « Enterprise AI »,
+    « Palo Alto Networks », Marco Rubio, et le mot « cela »."""
+    for mot in ("date", "cela", "celle", "martin", "enterprise", "rubio", "palo alto",
+                "hitachi", "samba", "carrefour"):
+        assert mot not in gaz["index"], f"« {mot} » ne doit plus être reconnu comme un lieu"
+
+
+def test_les_regions_declarees_restent_en_francais(gaz):
+    assert gaz["index"]["crimee"][0]["n"] == "Crimée"
+    assert gaz["index"]["gaza"][0]["n"] == "Bande de Gaza"
+
+
+def test_la_migration_rattrape_les_lieux_deja_enregistres(tmp_path):
+    """Un article déjà connu n'est jamais réécrit : sans rattrapage, « Spain » resterait
+    affiché à côté d'« Espagne » pendant un mois."""
+    chemin = tmp_path / "map.sqlite"
+    cx = base.ouvrir(chemin)
+    maintenant = base.maintenant_utc().isoformat()
+    for i, lieu in enumerate(["Spain", "United States", "Beijing", "Kharkiv", None]):
+        cx.execute("INSERT INTO articles (lien, titre, titre_norm, source, date_pub, zone, "
+                   "theme, lieu, ajout, maj) VALUES (?, ?, ?, 'S', ?, 'eur', 'def', ?, ?, ?)",
+                   (f"https://x.test/{i}", f"T{i}", f"t{i}", maintenant, lieu,
+                    maintenant, maintenant))
+    cx.execute("PRAGMA user_version = 15")
+    cx.commit()
+    cx.close()
+
+    cx = base.ouvrir(chemin)         # déclenche la migration v16
+    try:
+        lieux_apres = {r[0] for r in cx.execute("SELECT lieu FROM articles")}
+        assert lieux_apres == {"Espagne", "États-Unis", "Pékin", "Kharkiv", None}
+    finally:
+        cx.close()
+
+
+def test_la_migration_ne_repasse_pas_sur_une_base_a_jour(tmp_path):
+    cx = base.ouvrir(tmp_path / "map.sqlite")
+    try:
+        assert base.a_jour(cx)
+        assert base.renommer_les_lieux_en_francais(cx) == 0, "aucune ligne à toucher"
+    finally:
+        cx.close()
+
+
+def test_la_migration_depose_les_articles_mal_places(tmp_path):
+    """« Lockheed Martin » plaçait des articles en Slovaquie : ils quittent la carte, pas
+    le fil. Un article sans point reste lisible ; un point faux raconte une histoire fausse."""
+    chemin = tmp_path / "map.sqlite"
+    cx = base.ouvrir(chemin)
+    maintenant = base.maintenant_utc().isoformat()
+    cx.execute("INSERT INTO evenements (titre, titre_norm, lieu, lat, lon, theme, "
+               "date_debut, date_fin, maj, nb_sources) "
+               "VALUES ('E', 'e', 'Martin', 49.06, 18.92, 'def', ?, ?, ?, 1)",
+               (maintenant, maintenant, maintenant))
+    evt = cx.execute("SELECT id FROM evenements").fetchone()[0]
+    for i, lieu in [(1, "Martin"), (2, "Paris")]:
+        cx.execute("INSERT INTO articles (lien, titre, titre_norm, source, date_pub, zone, "
+                   "theme, lieu, lat, lon, lieu_origine, evenement_id, ajout, maj) "
+                   "VALUES (?, ?, ?, 'S', ?, 'eur', 'def', ?, 1.0, 2.0, 'gazetteer', ?, ?, ?)",
+                   (f"https://x.test/{i}", f"T{i}", f"t{i}", maintenant, lieu, evt,
+                    maintenant, maintenant))
+    cx.execute("PRAGMA user_version = 16")
+    cx.commit()
+    cx.close()
+
+    cx = base.ouvrir(chemin)      # déclenche la migration v17
+    try:
+        mauvais = cx.execute("SELECT * FROM articles WHERE titre = 'T1'").fetchone()
+        bon = cx.execute("SELECT * FROM articles WHERE titre = 'T2'").fetchone()
+        assert (mauvais["lieu"], mauvais["lat"], mauvais["lieu_origine"]) == (None, None, None)
+        assert mauvais["evenement_id"] == evt, "il reste dans le fil, il quitte la carte"
+        assert (bon["lieu"], bon["lat"]) == ("Paris", 1.0), "les bons lieux ne bougent pas"
+        e = cx.execute("SELECT * FROM evenements").fetchone()
+        assert (e["lieu"], e["lat"], e["lon"]) == (None, None, None)
+    finally:
+        cx.close()

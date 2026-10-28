@@ -98,7 +98,7 @@ déroutant — la puce du thème manque dans la barre, et ses articles s'affiche
 | `config/site.json` | L'affichage : langue sur laquelle le site s'ouvre |
 | `config/geocodage.json` | Le service de géocodage extérieur — **désactivé par défaut** |
 | `config/ia.json` | Le modèle de langage qui classe les thèmes douteux — **désactivé par défaut** |
-| `config/exonymes.json` | Les noms français des lieux (Londres, Pékin, Le Caire…) |
+| `config/exonymes.json` | Les noms français des lieux : ceux qu'on **reconnaît**, et ceux qu'on **affiche** |
 | `config/lieux_ignores.json` | Les noms de lieux à ne pas reconnaître, parce qu'ils sont aussi des mots courants |
 
 ### Ajouter ou retirer un thème
@@ -389,6 +389,21 @@ flux, 81 % sont placés.
 
 La **zone** se déduit du pays du lieu quand les mots-clés n'en donnent pas : sans cela, un
 quart des points seraient perdus faute de zone.
+
+**Les lieux s'affichent en français.** Le gazetteer vient de GeoNames et nomme tout en
+anglais ; « Spain » ou « Beijing » sous un article du *Monde* détonnent. Deux sources, selon
+le type de lieu : `collecteur/pays.json` pour les pays (211 noms, sans ambiguïté), et la
+section `affichage` de `config/exonymes.json` pour les villes — une liste courte et relue à
+la main. Elle est **distincte** de la liste d'alias du même fichier, qui sert à *reconnaître*
+et accepte pour cela « Kharkov », « Madras » ou « Bombay » : excellentes pour retrouver un
+lieu dans un titre, mauvaises pour le nommer. Retirer une ligne de `affichage` rend son nom
+GeoNames à la ville.
+
+**Les faux lieux.** `config/lieux_ignores.json` liste les noms que l'extraction ne doit pas
+reconnaître. Une première collecte réelle en a révélé une vingtaine : « Lockheed Martin »
+plaçait des articles à Martin (Slovaquie), « Enterprise AI » à Enterprise (Alabama),
+« Palo Alto Networks » en Californie, Marco Rubio au Venezuela, et le mot « cela » en
+Espagne. La règle reste la même : **mieux vaut un lieu manquant qu'un point faux.**
 
 ### Refaire la base de lieux
 

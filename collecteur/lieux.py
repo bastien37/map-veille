@@ -47,6 +47,28 @@ def normaliser(texte: str) -> str:
 # ---------------------------------------------------------------------------
 # Gazetteer
 # ---------------------------------------------------------------------------
+PAYS_JSON = RACINE / "collecteur" / "pays.json"
+
+
+def noms_francais_des_pays(chemin: Path = None) -> dict:
+    """Code ISO3 -> nom français du pays, d'après collecteur/pays.json."""
+    chemin = Path(chemin or PAYS_JSON)
+    if not chemin.exists():
+        return {}
+    return json.loads(chemin.read_text(encoding="utf-8")).get("noms_fr", {})
+
+
+EXONYMES_JSON = RACINE / "config" / "exonymes.json"
+
+
+def noms_affichage_des_villes(chemin: Path = None) -> dict:
+    """Nom GeoNames -> nom français affiché, pour les villes qui en ont un courant."""
+    chemin = Path(chemin or EXONYMES_JSON)
+    if not chemin.exists():
+        return {}
+    return json.loads(chemin.read_text(encoding="utf-8")).get("affichage", {})
+
+
 def charger_gazetteer(chemin: Path = None, stopliste: Path = None) -> dict:
     """Index { nom normalisé -> [lieux] }, prêt pour une recherche en un balayage.
 
@@ -61,10 +83,22 @@ def charger_gazetteer(chemin: Path = None, stopliste: Path = None) -> dict:
     if s.exists():
         ignores = {normaliser(n) for n in json.loads(s.read_text(encoding="utf-8"))["ignores"]}
 
+    # Le gazetteer vient de GeoNames : ses noms sont anglais. Sur un site francophone,
+    # « Spain » ou « Beijing » sous un article du Monde détonnent. Deux sources, selon le
+    # type de lieu : collecteur/pays.json pour les pays (211 noms, sans ambiguïté), et la
+    # section « affichage » d'exonymes.json pour les villes — une liste à part, courte et
+    # relue à la main, car la liste d'alias du même fichier sert à RECONNAÎTRE et accepte
+    # pour cela « Kharkov » ou « Madras », qui feraient de mauvais noms d'affichage.
+    noms_fr = noms_francais_des_pays()
+    affichage = noms_affichage_des_villes()
+
     index, nmax, pays_par_code = {}, 1, {}
     for lieu in donnees["lieux"]:
         if lieu["t"] == "pays":
+            lieu["n"] = noms_fr.get(lieu["c"], lieu["n"])
             pays_par_code[lieu["c"]] = lieu
+        elif lieu["t"] == "ville":
+            lieu["n"] = affichage.get(lieu["n"], lieu["n"])
         for nom in lieu["noms"]:
             cle = normaliser(nom)
             if len(cle) < LONGUEUR_MINIMALE or cle in ignores:
@@ -306,3 +340,19 @@ def situer(article: dict, gaz: dict, cx=None, geocodeur: Geocodeur = None) -> di
     if trouve or cx is None or geocodeur is None:
         return trouve
     return None
+
+
+def renommages(chemin: Path = None) -> dict:
+    """Nom GeoNames -> nom français affiché, pays et villes confondus.
+
+    Sert à rattraper les lieux déjà enregistrés sous leur nom anglais : un article connu
+    n'est jamais réécrit par la collecte, sans cela « Spain » resterait affiché à côté
+    d'« Espagne » pendant des semaines.
+    """
+    chemin = Path(chemin or GAZETTEER)
+    donnees = json.loads(gzip.decompress(chemin.read_bytes()).decode("utf-8"))
+    noms_fr = noms_francais_des_pays()
+    sortie = {l["noms"][0]: noms_fr[l["c"]] for l in donnees["lieux"]
+              if l["t"] == "pays" and l["c"] in noms_fr and l["noms"][0] != noms_fr[l["c"]]}
+    sortie.update(noms_affichage_des_villes())
+    return sortie
