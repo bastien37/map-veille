@@ -49,8 +49,9 @@ repère « Nouveau » sont calculés côté serveur.
    position sont conservés (C03). **Les articles de plus de 30 jours sont supprimés à chaque
    collecte (D05)**, et les événements qui n'ont plus de source avec eux.
 7. **Récapitulatif** — si le modèle est actif, un paragraphe par thème pour la journée.
-8. **Diffusion** — l'API sert le fil et les points de la carte. Un article sans zone ou sans
-   thème reste en base mais n'est pas diffusé (D04).
+8. **Diffusion** — l'API sert le fil et les points de la carte. Un article est diffusé s'il
+   a un thème, et une zone **ou** un thème imposé par sa source (D04, révisée ; voir
+   « Ce qui est diffusé, et ce qui ne l'est pas »).
 
 ## Démarrer
 
@@ -294,6 +295,38 @@ Un article classé par le modèle est marqué (`articles.theme_ia`) : `admin.py 
 `admin.py classer` corrige à la main ce qui est faux. **Un article classé à la main n'est plus
 jamais modifié**, ni par les mots-clés ni par le modèle.
 
+## Ce qui est diffusé, et ce qui ne l'est pas
+
+Un article est diffusé s'il a **un thème**, et **une zone ou un thème imposé par sa source**.
+C'est la vue `fil` ; `a_trier` en est exactement le complément, pour qu'aucun article ne
+tombe entre les deux. Les deux vues sont écrites à partir d'une seule condition, dans
+`collecteur/base.py` — les laisser diverger produirait des articles invisibles partout.
+
+| | Diffusé ? |
+|---|---|
+| Zone et thème | oui |
+| Thème imposé par la source, pas de zone | **oui** (depuis la v15) |
+| Thème trouvé par mots-clés, pas de zone, flux généraliste | non — à trier |
+| Zone mais pas de thème | non — à trier |
+| Masqué depuis l'administration | non, et absent des deux vues |
+
+**Pourquoi ce changement.** La règle d'origine (D04) exigeait zone *et* thème. Elle datait
+de la carte des six zones, où un article sans zone n'avait littéralement nulle part où
+s'afficher. Depuis la carte à points, la zone n'apparaît plus sur le site, et la carte ne
+montre que les articles localisés : l'exigence ne protégeait plus rien de visible, mais elle
+écartait un tiers des articles réels — surtout des avis du CERT-FR et des notes d'instituts,
+qui ne nomment aucun lieu et n'en nommeront jamais. Un flux à thème imposé dit lui-même de
+quoi il parle : exiger en plus une zone revenait à jeter ce qu'on savait déjà. Les flux
+généralistes gardent la règle entière.
+
+Mesuré sur les dépêches du jour : **63 % → 95 % d'articles diffusés**, 430 de plus, et pas un
+point de changement sur la carte. Les articles déjà en base sont rattrapés par la migration,
+car un article déjà connu n'est jamais réécrit — sans cela, un tiers du fonds serait resté
+invisible pour toujours.
+
+La zone reste utilisée : elle classe, elle filtre l'API (`?zone=`), et `admin.py stats` la
+montre — avec une ligne « sans zone » depuis que ces articles existent.
+
 ## Le récapitulatif du jour
 
 Un paragraphe par thème, écrit par le modèle de langage à partir des **seuls titres parus
@@ -345,7 +378,7 @@ Mesuré sur `tests/lieux_annotes.json` (52 cas annotés à la main, dont 14 qui 
 flux, 81 % sont placés.
 
 La **zone** se déduit du pays du lieu quand les mots-clés n'en donnent pas : sans cela, un
-quart des points seraient perdus faute de zone (D04).
+quart des points seraient perdus faute de zone.
 
 ### Refaire la base de lieux
 
@@ -398,7 +431,7 @@ projet ; le filtre par langue est la façon de n'en voir qu'un.
 ## La base de données
 
 `donnees/map.sqlite` est créée au premier lancement et migrée automatiquement. Le schéma est
-dans `collecteur/base.py` (version 14).
+dans `collecteur/base.py` (version 15).
 
 | Table ou vue | Contenu |
 |---|---|
@@ -410,7 +443,7 @@ dans `collecteur/base.py` (version 14).
 | `themes_ia` | Cache du classement par modèle de langage : un titre n'est soumis qu'une fois |
 | `recaps` | Un récapitulatif par thème et par journée, gardé 90 jours |
 | `collectes`, `collectes_sources` | Journal de chaque passage, source par source |
-| `fil` (vue) | Les articles publiables : zone **et** thème connus, non masqués |
+| `fil` (vue) | Les articles publiables : un thème, et une zone ou un thème imposé |
 | `a_trier` (vue) | Les articles que le tri n'a pas su classer |
 
 Outil en ligne de commande :
@@ -616,9 +649,8 @@ passés dans le tri et la localisation, sans rien enregistrer.
 | | |
 |---|---|
 | Articles placés sur la carte | 833 (**61 %**) |
-| Zone **et** thème, donc diffusés (D04) | 867 (**63 %**) |
-| Thème mais **pas de zone**, donc écartés | 452 (**33 %**) |
-| Ni l'un ni l'autre | 27 (2 %) |
+| Diffusés sous l'ancienne règle (zone **et** thème) | 867 (**63 %**) |
+| Diffusés sous la règle actuelle (D04 révisée) | 1 297 (**95 %**) |
 | Non classés par les mots-clés, flux sans thème imposé | 53 sur 157 (**34 %**) |
 
 Les 61 % de placement sont en dessous des 81 % mesurés sur le banc de flux : c'est attendu,
@@ -628,14 +660,11 @@ d'institut s'intitule « Vers un ordre multipolaire ? ».
 Les 34 % d'articles non classés par les mots-clés sont exactement la population que le
 classement par IA viserait, et une bonne base pour juger s'il apporte quelque chose.
 
-> ⚠️ **Un tiers des articles ne sort pas.** 452 articles ont un thème mais aucune zone, et la
-> règle D04 — ne diffuser que ce qui a *zone et thème* — les écarte. Ce sont surtout les
-> sources ajoutées récemment : 204 de `cyb`, 181 de `geo`, 50 de `def`. Un avis du CERT-FR
-> sur une faille, une analyse sur la dissuasion, n'ont pas de lieu et n'en auront jamais.
-> La question D04 figurait déjà dans les points à valider ; elle a maintenant un chiffre.
-> Lever l'exigence de zone pour les flux à thème imposé remettrait ces 452 articles dans le
-> fil sans rien changer à la carte, qui ne montre de toute façon que les articles localisés.
-> **C'est une décision de cahier des charges, elle n'a pas été prise ici.**
+C'est cette mesure qui a conduit à réviser D04 : **430 articles de plus sont diffusés**
+(204 de `cyb`, 181 de `geo`, 45 de `def`), et la carte n'a pas bougé d'un point, puisqu'elle
+ne montre que les articles localisés. Les 75 restants se répartissent en 53 sans aucun thème
+— la cible du classement par IA — et 22 qui ont un thème trouvé par mots-clés mais viennent
+d'un flux généraliste, donc sans garantie.
 
 ### Pourquoi Python, et quand rouvrir la question
 
@@ -680,8 +709,6 @@ Les thèmes ne sont plus codés en dur : voir `config/themes.json`.
 - Les exonymes français (`config/exonymes.json`) et les noms à ignorer
   (`config/lieux_ignores.json`), à enrichir dès qu'un cas réel est mal traité.
 - Le fond de carte : rester sur les tuiles OpenStreetMap ou installer son propre serveur.
-- **D04, maintenant chiffrée** : faut-il encore exiger une zone **et** un thème pour
-  diffuser ? Sur 1 372 articles réels, 452 (un tiers) ont un thème mais pas de zone et
-  restent invisibles. Voir « Ce que donnent les vraies dépêches ». La zone n'apparaît plus
-  sur le site et la carte n'affiche que les articles localisés : l'exigence ne protège plus
-  rien de visible.
+- **D04 a été révisée** (voir « Ce qui est diffusé, et ce qui ne l'est pas ») : à surveiller
+  sur quelques jours, pour vérifier qu'aucun flux à thème imposé ne fait entrer du bruit
+  dans le fil maintenant qu'il n'a plus besoin de zone.

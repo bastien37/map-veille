@@ -229,9 +229,15 @@ def synthese(requete: Request, theme: Optional[str] = None, themes: Optional[str
             f"""SELECT zone, COUNT(*) AS total, SUM(ajout >= ?) AS nouveaux
                 FROM fil WHERE {where} GROUP BY zone""", [seuil_nouveau, *params]).fetchall()
         par_zone = {code: {"total": 0, "nouveaux": 0} for code in base.ZONES}
+        # Depuis v15, un article à thème imposé est diffusé même sans zone : il ne tombe
+        # dans aucune des six cases, et on le compte à part plutôt que de l'oublier.
+        sans_zone = {"total": 0, "nouveaux": 0}
         for r in lignes:
-            par_zone[r["zone"]] = {"total": r["total"], "nouveaux": r["nouveaux"] or 0}
+            case = par_zone.setdefault(r["zone"], sans_zone) if r["zone"] else sans_zone
+            case["total"] = r["total"]
+            case["nouveaux"] = r["nouveaux"] or 0
         sortie["zones"] = par_zone
+        sortie["sans_zone"] = sans_zone
     derniere = cx.execute("SELECT fin FROM collectes WHERE fin IS NOT NULL AND hors_ligne = 0 "
                           "ORDER BY id DESC LIMIT 1").fetchone()
     comptes = cx.execute(

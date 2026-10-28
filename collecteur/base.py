@@ -86,7 +86,7 @@ THEMES = {t["code"]: t["nom"] for t in THEMES_DECLARES}
 THEMES_ACTIFS = [t["code"] for t in THEMES_DECLARES if t["actif"]]
 REGLES_THEMES = {t["code"]: t["mots_cles"] for t in THEMES_DECLARES}
 
-VERSION_SCHEMA = 14  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+VERSION_SCHEMA = 15  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
                     # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs,
                     # pause_jusqu_a ; v7 : themes.actif/ordre, sources.langue/frequence/theme/
                     # origine ; v8 : articles.lat/lon/lieu, table lieux_geocodes ;
@@ -95,7 +95,8 @@ VERSION_SCHEMA = 14  # v2 : articles.masque ; v3 : table sources ; v4 : collecte
                     # v11 : articles.langue, evenements.langues ;
                     # v12 : idx_evenements_carte porte aussi langues, lieu et titre ;
                     # v13 : articles.theme_ia, table themes_ia ;
-                    # v14 : table recaps
+                    # v14 : table recaps ;
+                    # v15 : articles.theme_force, D04 assoupli (voir PUBLIABLE)
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -280,17 +281,33 @@ CREATE INDEX IF NOT EXISTS idx_evenements_fil       ON evenements(theme, date_fi
 CREATE INDEX IF NOT EXISTS idx_articles_evenement   ON articles(evenement_id);
 """
 
-VUES = """
+# D04, révisé en v15. La règle d'origine — diffuser seulement ce qui a une zone ET un thème
+# — datait de la carte des six zones, où un article sans zone n'avait littéralement nulle
+# part où s'afficher. Depuis la carte à points, la zone n'apparaît plus sur le site et la
+# carte ne montre que les articles localisés : l'exigence ne protégeait plus rien de visible.
+#
+# Elle coûtait cher, en revanche : sur 1 372 articles réels du 28/10/2026, 452 (un tiers)
+# avaient un thème mais aucune zone et restaient invisibles — surtout les avis du CERT-FR et
+# les notes d'instituts, qui ne nomment aucun lieu et n'en nommeront jamais.
+#
+# Un flux à thème imposé dit lui-même de quoi il parle : son thème ne se devine pas, il est
+# déclaré. Exiger en plus une zone revenait à jeter ce qu'on savait déjà. Les flux
+# généralistes, eux, gardent la règle : sans zone ni thème trouvés, rien ne garantit qu'un
+# de leurs articles ait sa place quelque part.
+PUBLIABLE = "theme IS NOT NULL AND (zone IS NOT NULL OR theme_force = 1)"
+
+VUES = f"""
 DROP VIEW IF EXISTS fil;
 DROP VIEW IF EXISTS a_trier;
 
--- Articles publiables : zone ET thème connus, non masqués
+-- Articles publiables : un thème, et une zone ou un thème imposé par la source
 CREATE VIEW fil AS
-    SELECT * FROM articles WHERE zone IS NOT NULL AND theme IS NOT NULL AND masque = 0;
+    SELECT * FROM articles WHERE {PUBLIABLE} AND masque = 0;
 
--- Articles que le tri automatique n'a pas su classer (hors articles masqués)
+-- Articles que le tri automatique n'a pas su classer (hors articles masqués).
+-- Exactement le complément de « fil » : les deux vues ne peuvent pas diverger.
 CREATE VIEW a_trier AS
-    SELECT * FROM articles WHERE (zone IS NULL OR theme IS NULL) AND masque = 0;
+    SELECT * FROM articles WHERE NOT ({PUBLIABLE}) AND masque = 0;
 """
 
 
@@ -339,7 +356,8 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
                                     ("lieu", "TEXT"), ("lieu_origine", "TEXT"),
                                     ("evenement_id", "INTEGER REFERENCES evenements(id)"),  # v9
                                     ("langue", "TEXT NOT NULL DEFAULT 'fr'"),          # v11
-                                    ("theme_ia", "INTEGER NOT NULL DEFAULT 0")):      # v13
+                                    ("theme_ia", "INTEGER NOT NULL DEFAULT 0"),      # v13
+                                    ("theme_force", "INTEGER NOT NULL DEFAULT 0")):  # v15
                 if nom not in colonnes:
                     cx.execute(f"ALTER TABLE articles ADD COLUMN {nom} {definition}")
             if "langues" not in {r["name"] for r in cx.execute("PRAGMA table_info(evenements)")}:
@@ -355,6 +373,14 @@ def ouvrir(chemin=BASE, multi_thread: bool = False) -> sqlite3.Connection:
             cx.executemany("INSERT OR REPLACE INTO zones VALUES (?, ?)", ZONES.items())
             appliquer_themes(cx)
             appliquer_flux(cx)
+            if "theme_force" not in colonnes:
+                # v15 : les articles déjà en base ne portent pas le drapeau. On le reconstitue
+                # depuis la source, après appliquer_flux() pour que theme_impose soit à jour.
+                # Sans cela, un tiers du fonds resterait invisible jusqu'à une recollecte qui
+                # n'aura jamais lieu : un article déjà connu n'est pas réécrit.
+                cx.execute("UPDATE articles SET theme_force = 1 WHERE theme IS NOT NULL "
+                           "AND source IN (SELECT nom FROM sources "
+                           "               WHERE theme_impose IS NOT NULL)")
             cx.execute(f"PRAGMA user_version = {VERSION_SCHEMA}")
         cx.commit()
     except Exception:
@@ -675,12 +701,13 @@ def enregistrer(cx, a: dict, titre_norm: str, maintenant: datetime, collecte_id:
     cx.execute(
         """INSERT INTO articles (lien, titre, titre_norm, source, date_pub, zone, theme,
                                  ajout, maj, collecte_id, lat, lon, lieu, lieu_origine,
-                                 evenement_id, langue, theme_ia)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                 evenement_id, langue, theme_ia, theme_force)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (a["lien"], a["titre"], titre_norm, a["source"], date.isoformat(),
          a["zone"], a["theme"], maintenant.isoformat(), maintenant.isoformat(), collecte_id,
          a.get("lat"), a.get("lon"), a.get("lieu"), a.get("lieu_origine"), evenement_id,
-         a.get("langue") or "fr", 1 if a.get("theme_ia") else 0))
+         a.get("langue") or "fr", 1 if a.get("theme_ia") else 0,
+         1 if a.get("theme_force") else 0))
     rafraichir_evenement(cx, evenement_id)
     return "nouveau" if premier else "regroupe"
 

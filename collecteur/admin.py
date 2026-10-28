@@ -34,8 +34,10 @@ def cmd_stats(cx, args):
     print("Articles classés par zone et par thème (toute la base) :")
     themes = list(base.THEMES)
     print(f"  {'':34}" + "".join(f"{t:>6}" for t in themes) + f"{'total':>7}")
-    for code, nom in base.ZONES.items():
-        n = dict(cx.execute("SELECT theme, COUNT(*) FROM fil WHERE zone = ? GROUP BY theme", (code,)).fetchall())
+    for code, nom in [*base.ZONES.items(), (None, "(sans zone — flux à thème imposé)")]:
+        ou = "zone = ?" if code else "zone IS NULL"
+        n = dict(cx.execute(f"SELECT theme, COUNT(*) FROM fil WHERE {ou} GROUP BY theme",
+                            (code,) if code else ()).fetchall())
         print(f"  {nom:34}" + "".join(f"{n.get(t, 0):>6}" for t in themes) + f"{sum(n.values()):>7}")
 
     print("\nArticles par source :")
