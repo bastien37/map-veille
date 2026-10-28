@@ -352,3 +352,58 @@ def test_sans_ia_court_circuite_tout(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(ia, "charger_classificateur", interdit)
     collect.main(["--base", str(tmp_path / "map.sqlite"), "--hors-ligne", "--sans-ia"])
     assert "Classement par IA" not in capsys.readouterr().out
+
+
+# ---------- essayer la configuration ----------
+def test_l_essai_fait_un_appel_par_usage(capsys):
+    """Sans cette commande, la seule façon de savoir si une clé marche était de lancer une
+    collecte et de lire le journal — long, et confondu avec les pannes de flux."""
+    import admin
+    reponses = iter(["cyb", "Trois incidents distincts ce jour-là."])
+    c = ia.Classificateur("https://m.test/v1", "modele-test", appels_par_minute=6000,
+                          ouvrir=lambda _: reponse(next(reponses)))
+    assert admin.essayer_le_modele(c, ia) is True
+    sortie = capsys.readouterr().out
+    assert c.appels == 2
+    assert "modele-test" in sortie and "cyb" in sortie
+    assert "Trois incidents distincts" in sortie
+    assert "Rien n'a été enregistré" in sortie
+
+
+def test_l_essai_dit_pourquoi_ca_echoue(capsys):
+    import admin
+    c = faux(erreur=OSError("401 Unauthorized"))
+    assert admin.essayer_le_modele(c, ia) is False
+    assert "401 Unauthorized" in capsys.readouterr().out
+
+
+def test_l_essai_n_ecrit_rien_en_base(cx, capsys):
+    import admin
+    c = faux("cyb")
+    admin.essayer_le_modele(c, ia)
+    assert cx.execute("SELECT COUNT(*) FROM themes_ia").fetchone()[0] == 0
+    assert cx.execute("SELECT COUNT(*) FROM recaps").fetchone()[0] == 0
+
+
+# ---------- les services préréglés ----------
+def test_les_services_prerégles_sont_complets():
+    livre = json.loads(ia.IA_JSON.read_text(encoding="utf-8"))["_services"]
+    services = {c: v for c, v in livre.items() if not c.startswith("_")}
+    assert {"groq", "mistral", "deepseek", "ollama", "gemini", "openrouter"} <= set(services)
+    for nom, s in services.items():
+        assert s["url"].startswith("http") and s["modele"], nom
+        assert "cle_env" in s and "_" in s, nom
+        # un service payant doit le dire : personne ne doit découvrir la facture après coup
+        assert ("GRATUIT" in s["_"] or "PAYANT" in s["_"] or nom == "ollama"), nom
+
+
+def test_un_service_preregle_se_recopie_tel_quel(tmp_path):
+    """Changer d'hébergeur ne doit demander que trois lignes."""
+    livre = json.loads(ia.IA_JSON.read_text(encoding="utf-8"))
+    for nom in ("deepseek", "mistral", "cerebras"):
+        s = livre["_services"][nom]
+        f = tmp_path / f"{nom}.json"
+        f.write_text(json.dumps({"actif": True, "url": s["url"], "modele": s["modele"],
+                                 "cle_env": s["cle_env"]}), encoding="utf-8")
+        c = ia.charger_classificateur(f, {s["cle_env"]: "clé-factice"})
+        assert c.url == s["url"] and c.modele == s["modele"]

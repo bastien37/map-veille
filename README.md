@@ -272,11 +272,41 @@ uv run collecteur/admin.py ia        # ce que le modèle a classé, et son état
 uv run collecteur/collect.py --sans-ia   # une collecte sans l'appeler
 ```
 
-Cinq services sont préréglés dans le fichier, tous en dialecte « chat completions »
-d'OpenAI : **Groq**, **Mistral**, **OpenRouter**, **Google Gemini**, et **Ollama** en local.
-Ollama est le seul vraiment gratuit et le seul où rien ne sort du serveur : c'est le choix à
-préférer sur un VPS qui a la mémoire pour. Les quotas et les noms de modèles des autres
+Huit services sont préréglés dans `config/ia.json`. Tous parlent le même dialecte
+« chat completions » et s'authentifient de la même façon : **changer d'hébergeur ne demande
+que trois lignes** — `url`, `modele`, `cle_env`.
+
+| | Service | Coût |
+|---|---|---|
+| **Groq** | `api.groq.com` | gratuit, généreux, très rapide |
+| **Cerebras** | `api.cerebras.ai` | gratuit, très rapide |
+| **Mistral** | `api.mistral.ai` | gratuit (offre « Experiment », débit limité), français |
+| **Google Gemini** | `generativelanguage.googleapis.com` | gratuit, plafonné |
+| **OpenRouter** | `openrouter.ai` | gratuit pour les modèles suffixés `:free` |
+| **DeepSeek** | `api.deepseek.com` | **payant**, mais parmi les moins chers |
+| **Together** | `api.together.xyz` | **payant** pour l'essentiel du catalogue |
+| **Ollama** | `127.0.0.1:11434` | gratuit pour de bon, **rien ne sort du serveur** |
+
+Les huit adresses ont été vérifiées : elles répondent `401` sans clé, ce qui prouve qu'elles
+existent et attendent bien une authentification. Les quotas et les noms de modèles, eux,
 changent souvent — les vérifier chez le fournisseur avant de s'y fier.
+
+**DeepSeek n'est pas gratuit**, contrairement à une idée répandue : il se facture au jeton,
+très bas. À l'échelle de ce projet la dépense est dérisoire — sept appels par jour pour le
+récapitulatif, et le classement n'appelle que sur les titres que les mots-clés n'ont pas
+tranchés, une fois chacun grâce au cache. Quelques centimes par mois. Mais ce n'est pas zéro,
+et il faut une carte.
+
+**Essayer avant de se lancer :**
+
+```bash
+export MAP_IA_CLE="..."
+uv run collecteur/admin.py ia --tester
+```
+
+Deux appels réels — un classement, un résumé — sans rien enregistrer. La commande affiche ce
+que le modèle répond et en combien de temps, ou l'erreur exacte. C'est la façon de vérifier
+une clé sans lancer une collecte entière.
 
 `quand` règle le déclenchement : `doute` (défaut : aucun thème trouvé **ou** deux thèmes à
 égalité), `manquant` (seulement quand rien n'a été trouvé), `tout` (chaque article, coûteux).

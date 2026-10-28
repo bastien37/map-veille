@@ -7,6 +7,7 @@ MAP – Outil d'administration de la base SQLite.
     uv run collecteur/admin.py verifier-flux             # quelles sources répondent vraiment
     uv run collecteur/admin.py verifier-flux --decouvrir # et cherche l'adresse de celles qui échouent
     uv run collecteur/admin.py ia                        # ce que le modèle de langage a classé
+    uv run collecteur/admin.py ia --tester               # essaie la clé, en deux appels
     uv run collecteur/admin.py recap                     # récapitulatif du jour, thème par thème
     uv run collecteur/admin.py a-trier                   # articles que le tri n'a pas su classer
     uv run collecteur/admin.py classer 42 asi def        # classe l'article 42 à la main
@@ -256,6 +257,44 @@ def _decouvrir(sources, modifs: dict) -> list:
     return trouves
 
 
+def essayer_le_modele(classificateur, ia) -> bool:
+    """Deux appels réels, un par usage, sans rien enregistrer. Dit ce qui revient.
+
+    Sans cela, la seule façon de savoir si une clé marche était de lancer une collecte et
+    de lire le journal — long, et le résultat se confond avec les pannes de flux.
+    """
+    themes = ia.rubriques(base.THEMES_DECLARES)
+    print(f"Essai de {classificateur.modele} sur {classificateur.url}\n")
+
+    titre = "Rançongiciel : un hôpital contraint de dérouter ses urgences"
+    print(f"1. Classement d'un titre\n   « {titre} »")
+    debut = time.perf_counter()
+    abouti, theme = classificateur.classer(titre, "", themes)
+    duree = time.perf_counter() - debut
+    if not abouti:
+        print(f"   ÉCHEC en {duree:.1f} s — {classificateur.derniere_erreur}")
+        return False
+    attendu = " (attendu : cyb)" if "cyb" in themes else ""
+    print(f"   -> {theme or 'aucune rubrique'}{attendu}, en {duree:.1f} s")
+
+    lignes = [{"titre": t, "source": s} for t, s in [
+        ("Faille critique corrigée en urgence dans un logiciel de VPN", "CERT-FR"),
+        ("Un hôpital de Lyon paralysé par un rançongiciel", "LeMagIT"),
+        ("Fuite de données chez un opérateur téléphonique", "ZATAZ")]]
+    print("\n2. Récapitulatif de trois titres")
+    debut = time.perf_counter()
+    abouti, texte = classificateur.resumer(lignes, "Cybersécurité", "2026-10-28", 60)
+    duree = time.perf_counter() - debut
+    if not abouti:
+        print(f"   ÉCHEC en {duree:.1f} s — {classificateur.derniere_erreur}")
+        return False
+    print(f"   {duree:.1f} s, {len(texte.split())} mots :\n")
+    for ligne in texte.splitlines():
+        print("     " + ligne.strip())
+    print("\nLa configuration fonctionne. Rien n'a été enregistré.")
+    return True
+
+
 def cmd_ia(cx, args):
     """État du classement par modèle de langage : configuration, cache, et ce qu'il a changé."""
     import ia
@@ -264,6 +303,10 @@ def cmd_ia(cx, args):
     except ValueError as e:
         print(f"config/ia.json : {e}\n")
         classificateur = None
+    if args.tester:
+        if not classificateur:
+            sys.exit("Rien à essayer : le modèle est inactif dans config/ia.json.")
+        sys.exit(0 if essayer_le_modele(classificateur, ia) else 1)
     if classificateur:
         print(f"Actif — {classificateur.modele} sur {classificateur.url}")
         print(f"  déclenché « {ia.quand_demander()} », au plus "
@@ -393,6 +436,8 @@ def main(argv=None):
                    help="reporter les adresses trouvées et les vérifications dans config/flux.json")
     p = sous.add_parser("ia", help="état du classement par modèle de langage")
     p.add_argument("--limite", type=int, default=15)
+    p.add_argument("--tester", action="store_true",
+                   help="essaie la configuration en deux appels réels, sans rien enregistrer")
     p = sous.add_parser("recap", help="récapitulatif quotidien par thème")
     p.add_argument("--jour", help="journée à résumer, AAAA-MM-JJ (défaut : aujourd'hui, UTC)")
     p.add_argument("--theme", help="un seul thème")

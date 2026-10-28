@@ -17,36 +17,56 @@
     "max_mots": 140
   },
   "_services": {
-    "_": "Réglages à recopier dans les champs ci-dessus. Tous parlent le dialecte « chat completions » d'OpenAI. Les quotas gratuits et les noms de modèles changent souvent : vérifier chez le fournisseur avant de s'y fier, et lire ses conditions d'utilisation.",
+    "_": "Réglages à recopier dans les champs ci-dessus. Tous parlent le dialecte « chat completions » d'OpenAI, et s'authentifient par « Authorization: Bearer <clé> » : changer d'hébergeur ne demande que ces trois lignes. Les adresses ont été vérifiées le 28/10/2026 (elles répondent 401 sans clé, ce qui prouve qu'elles existent et attendent bien une authentification). Les quotas et les noms de modèles, eux, changent souvent : vérifier chez le fournisseur avant de s'y fier, et lire ses conditions d'utilisation. « uv run collecteur/admin.py ia --tester » essaie la configuration en deux appels, sans rien enregistrer.",
+    "_gratuits": "Groq, Cerebras, Mistral, Google Gemini et les modèles « :free » d'OpenRouter ont une offre gratuite au 28/10/2026. Ollama est gratuit pour de bon et ne fait sortir aucune donnée du serveur.",
+    "_payants": "DeepSeek et Together n'ont PAS d'offre gratuite : ils se facturent au jeton. À l'échelle de ce projet la dépense est dérisoire — le récapitulatif coûte sept appels par jour, et le classement n'appelle que sur les titres que les mots-clés n'ont pas tranchés, une fois chacun grâce au cache. Compter quelques centimes par mois. Mais ce n'est pas zéro, et il faut une carte.",
     "groq": {
       "url": "https://api.groq.com/openai/v1/chat/completions",
       "modele": "llama-3.3-70b-versatile",
       "cle_env": "MAP_IA_CLE",
-      "_": "Offre gratuite généreuse et très rapide. Clé sur console.groq.com."
+      "_": "GRATUIT, généreux et très rapide. Clé sur console.groq.com. Le meilleur point de départ si l'on ne veut pas héberger de modèle."
+    },
+    "cerebras": {
+      "url": "https://api.cerebras.ai/v1/chat/completions",
+      "modele": "llama3.1-8b",
+      "cle_env": "MAP_IA_CLE",
+      "_": "GRATUIT, très rapide. Clé sur cloud.cerebras.ai."
     },
     "mistral": {
       "url": "https://api.mistral.ai/v1/chat/completions",
       "modele": "mistral-small-latest",
       "cle_env": "MAP_IA_CLE",
-      "_": "Fournisseur français, offre d'essai gratuite. Clé sur console.mistral.ai."
-    },
-    "openrouter": {
-      "url": "https://openrouter.ai/api/v1/chat/completions",
-      "modele": "meta-llama/llama-3.3-70b-instruct:free",
-      "cle_env": "MAP_IA_CLE",
-      "_": "Passerelle vers plusieurs modèles ; ceux dont le nom finit par « :free » sont gratuits."
+      "_": "GRATUIT (offre « Experiment », débit limité). Fournisseur français, données en Europe : c'est l'argument qui compte pour ce projet. Clé sur console.mistral.ai ; baisser appels_par_minute à 10 ou moins."
     },
     "gemini": {
       "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
       "modele": "gemini-2.0-flash",
       "cle_env": "MAP_IA_CLE",
-      "_": "Point d'entrée compatible OpenAI de Google. Offre gratuite plafonnée."
+      "_": "GRATUIT, plafonné. Point d'entrée compatible OpenAI de Google. Clé sur aistudio.google.com."
+    },
+    "openrouter": {
+      "url": "https://openrouter.ai/api/v1/chat/completions",
+      "modele": "meta-llama/llama-3.3-70b-instruct:free",
+      "cle_env": "MAP_IA_CLE",
+      "_": "Passerelle vers des dizaines de modèles. Ceux dont le nom finit par « :free » sont GRATUITS, avec un débit faible : utile pour comparer plusieurs modèles sans changer de compte."
+    },
+    "deepseek": {
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "modele": "deepseek-chat",
+      "cle_env": "MAP_IA_CLE",
+      "_": "PAYANT, mais parmi les moins chers du marché — quelques centimes par mois à cette échelle. Bon en français. Clé sur platform.deepseek.com."
+    },
+    "together": {
+      "url": "https://api.together.xyz/v1/chat/completions",
+      "modele": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "cle_env": "MAP_IA_CLE",
+      "_": "PAYANT pour l'essentiel du catalogue. Clé sur api.together.ai."
     },
     "ollama": {
       "url": "http://127.0.0.1:11434/v1/chat/completions",
       "modele": "llama3.2",
       "cle_env": "",
-      "_": "Modèle tourné sur la machine : gratuit pour de bon, rien ne sort du serveur, aucune clé. C'est le choix à préférer sur un VPS qui a la mémoire pour. « ollama pull llama3.2 » puis « ollama serve »."
+      "_": "Modèle tourné SUR LA MACHINE : gratuit pour de bon, aucune clé, et rien ne sort du serveur — ni les titres, ni les sources. C'est le choix à préférer sur un VPS qui a la mémoire pour (3 Gio suffisent pour llama3.2:3b). « ollama pull llama3.2 » puis « ollama serve »."
     }
   }
 }
