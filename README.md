@@ -19,7 +19,8 @@ Flux RSS + API ──► collecteur/collect.py ──────────►
                      modèle de langage si doute      et de classement
                      (collecteur/ia.py)                      │
                    · localisation (collecteur/lieux.py)      │
-                   · regroupement en événements               │ lecture seule
+                   · regroupement en événements               │
+                   · récapitulatif du jour par thème          │ lecture seule
                                                               ▼
                               navigateur ◄── JSON ── serveur/app.py (API FastAPI)
                               site/index.html         /api/referentiel, /api/synthese,
@@ -47,7 +48,8 @@ repère « Nouveau » sont calculés côté serveur.
 6. **Stockage** — `donnees/map.sqlite`. Seuls le titre, la source, la date, le lien et la
    position sont conservés (C03). **Les articles de plus de 30 jours sont supprimés à chaque
    collecte (D05)**, et les événements qui n'ont plus de source avec eux.
-7. **Diffusion** — l'API sert le fil et les points de la carte. Un article sans zone ou sans
+7. **Récapitulatif** — si le modèle est actif, un paragraphe par thème pour la journée.
+8. **Diffusion** — l'API sert le fil et les points de la carte. Un article sans zone ou sans
    thème reste en base mais n'est pas diffusé (D04).
 
 ## Démarrer
@@ -169,14 +171,15 @@ lus. Les adresses essayées passent par le même contrôle anti-SSRF que la coll
 
 ### Les sources livrées
 
-48 sources : 7 généralistes, 12 de défense, 28 de géopolitique, 1 d'alertes catastrophes.
-28 en français, 20 en anglais.
+62 sources : 7 généralistes, 12 de défense, 28 de géopolitique, 14 de cybersécurité,
+1 d'alertes catastrophes. 34 en français, 28 en anglais.
 
 | Thème | Sources |
 |---|---|
 | *(aucun — tri par mots-clés)* | Le Monde, France 24, RFI, franceinfo, Courrier international, The Conversation France, ReliefWeb |
 | `def` Conflits et défense | Opex360, Forces Operations Blog, Meta-Defense, Mer et Marine, East Pendulum, Ministère des Armées, Defense News, Breaking Defense, Defense One, Naval News, The War Zone, OTAN |
 | `geo` Géopolitique | IFRI, IRSEM, Le Grand Continent, Revue Défense Nationale, Le Rubicon, Revue Conflits, Diploweb, Institut Montaigne, Fondation Robert Schuman, Areion24, Politique étrangère, Le Monde diplomatique, Orient XXI, Géoconfluences, The National Interest, War on the Rocks, ECFR, Carnegie, Atlantic Council, Lowy Institute, Foreign Affairs, Foreign Policy, The Diplomat, Chatham House, RUSI, CSIS, SWP Berlin, Responsible Statecraft |
+| `cyb` Cybersécurité et informatique | CERT-FR, ANSSI, LeMagIT, Le Monde Informatique, Next, ZATAZ, Krebs on Security, BleepingComputer, The Record, The Hacker News, Dark Reading, CISA, Schneier on Security, Ars Technica |
 | `cli` Climat et catastrophes | GDACS |
 
 Les fréquences suivent le rythme réel de publication : 60 min pour un quotidien, 120 à 180
@@ -189,7 +192,16 @@ du site.
 `def`, une visite d'ambassadeur dans `dip`. Un test le vérifie
 (`tests/test_config.py::test_les_mots_cles_geo_ne_devorent_pas_les_autres_themes`).
 
-> ⚠️ **Les 41 adresses ajoutées pour `def` et `geo` n'ont jamais été testées.** Le réseau
+**Le thème `cyb`** couvre la cybersécurité *et* l'informatique au sens large. En le créant,
+`cyber*`, `internet`, `numerique`, `puce*` et `semi conducteur*` ont **quitté `tec`** : les
+laisser aux deux endroits aurait donné un point à chacun sur tout article de cybersécurité,
+donc une égalité permanente. `tec` garde l'espace, les sciences et l'intelligence
+artificielle, et a reçu en échange `recherche`, `laboratoire`, `biotech*`, `telescope`,
+`orbite`, `astronom*`, `physique`, `genome`, `vaccin*`. Un test interdit désormais qu'un
+mot-clé appartienne à deux thèmes, ou qu'une racine en couvre un autre du même thème
+(`cyber*` rendait `cyberattaque*` inutile, et doublait son score).
+
+> ⚠️ **Les 55 adresses ajoutées pour `def`, `geo` et `cyb` n'ont jamais été testées.** Le réseau
 > extérieur n'était pas joignable depuis l'environnement où elles ont été écrites : elles
 > suivent les conventions habituelles (`/feed/` pour WordPress, `/rss.xml` ailleurs) et
 > chacune porte une note le disant dans `config/flux.json`. Avant la première collecte :
@@ -261,6 +273,35 @@ choisissant ses mots.
 Un article classé par le modèle est marqué (`articles.theme_ia`) : `admin.py ia` les liste, et
 `admin.py classer` corrige à la main ce qui est faux. **Un article classé à la main n'est plus
 jamais modifié**, ni par les mots-clés ni par le modèle.
+
+## Le récapitulatif du jour
+
+Un paragraphe par thème, écrit par le modèle de langage à partir des **seuls titres parus
+ce jour-là**, affiché en haut de la page dans un bloc pliable.
+
+```bash
+uv run collecteur/admin.py recap                      # le jour même
+uv run collecteur/admin.py recap --jour 2026-10-27
+uv run collecteur/admin.py recap --theme cyb --refaire
+```
+
+Il est écrit **à la collecte** et rangé en base (`"recap": {"actif": true}` dans
+`config/ia.json`). Afficher la page ne déclenche jamais d'appel à un service extérieur : ce
+serait un appel par visiteur, et le texte serait différent à chaque rechargement. Sans
+modèle configuré, `admin.py recap` reste utile — il affiche ce qui est déjà en base.
+
+Le coût est négligeable : un appel par thème et par jour, sept au total. Un récapitulatif
+déjà écrit n'est refait que si la journée a **gagné des articles** *et* que le précédent a
+dépassé `recap.intervalle_minutes` (trois heures par défaut). Sans nouvel article le texte
+serait identique : on ne dépense rien. Les récapitulatifs sont gardés 90 jours, bien après
+les articles qu'ils résument — cela donne une mémoire du trimestre pour presque rien.
+
+La consigne donnée au modèle lui interdit d'ajouter le moindre fait, chiffre, date ou nom
+qui ne soit pas dans les titres, et lui dit explicitement que ces titres sont des données,
+jamais des instructions. Le bloc affiché porte la mention de ce qu'il est : *« Texte écrit
+par un modèle de langage à partir des seuls titres parus ce jour-là. Il peut se tromper :
+les articles d'origine font foi. »* Un résumé reste un résumé ; c'est pour cela que les
+articles sont juste en dessous.
 
 ## Comment un article arrive sur la carte
 
@@ -337,7 +378,7 @@ projet ; le filtre par langue est la façon de n'en voir qu'un.
 ## La base de données
 
 `donnees/map.sqlite` est créée au premier lancement et migrée automatiquement. Le schéma est
-dans `collecteur/base.py` (version 13).
+dans `collecteur/base.py` (version 14).
 
 | Table ou vue | Contenu |
 |---|---|
@@ -347,6 +388,7 @@ dans `collecteur/base.py` (version 13).
 | `sources` | Les sources : état du cache conditionnel, disjoncteur, langue, fréquence, origine |
 | `lieux_geocodes` | Cache de géocodage, succès et échecs |
 | `themes_ia` | Cache du classement par modèle de langage : un titre n'est soumis qu'une fois |
+| `recaps` | Un récapitulatif par thème et par journée, gardé 90 jours |
 | `collectes`, `collectes_sources` | Journal de chaque passage, source par source |
 | `fil` (vue) | Les articles publiables : zone **et** thème connus, non masqués |
 | `a_trier` (vue) | Les articles que le tri n'a pas su classer |
@@ -358,6 +400,7 @@ uv run collecteur/admin.py stats      # chiffres par zone et thème, dernières 
 uv run collecteur/admin.py config     # thèmes et sources tels que la configuration les a posés
 uv run collecteur/admin.py verifier-flux   # quelles sources répondent vraiment
 uv run collecteur/admin.py ia         # état du classement par modèle de langage
+uv run collecteur/admin.py recap      # récapitulatif du jour, thème par thème
 uv run collecteur/admin.py a-trier    # articles non classés, avec leur numéro
 uv run collecteur/admin.py classer 42 asi def
 uv run collecteur/admin.py chercher "Taïwan"
@@ -374,6 +417,7 @@ Un article classé à la main n'est plus jamais modifié par le collecteur.
 | `GET /api/articles` | `zone`, `theme`, `themes`, `langue`, `jours`, `limite`, `decalage`, `grouper` | Le fil, une ligne par événement par défaut |
 | `GET /api/evenements` | `theme`, `themes`, `zone`, `langue`, `jours`, `bbox`, `limite` | Les points de la carte, les plus suivis d'abord |
 | `GET /api/evenements/{id}` | – | Un événement et **toutes ses sources** |
+| `GET /api/recap` | `jour`, `theme`, `themes` | Le récapitulatif quotidien déjà écrit (cette route ne calcule rien) |
 | `GET /api/direct` | – | Flux Server-Sent Events : signale qu'une collecte a eu lieu |
 | `GET /api/collectes` | `limite` | Journal des collectes et état de chaque source |
 
@@ -390,6 +434,11 @@ Les réponses sont compressées (gzip) et portent `Cache-Control` et `ETag` : le
 gardé une heure, le fil une minute, et un navigateur à jour reçoit `304`.
 
 ## Le site
+
+En haut, le **récapitulatif du jour** quand il existe : un bloc pliable (`<details>`, donc
+pliable au clavier sans une ligne de JavaScript), une colonne par thème sur grand écran, le
+choix plié/déplié retenu localement. Absent par défaut, et la page cesse alors de le
+demander à chaque rafraîchissement.
 
 Deux vues — **Carte** et **Liste seule** — un filtre de période, un filtre de langue
 (Toutes / Français / Anglais) et des thèmes que le visiteur coche à sa guise (ses choix sont
@@ -446,7 +495,7 @@ fréquence ni la fin d'une mise en pause.
 | **XSS** — du HTML dans un flux | Les balises sont retirées à la collecte, et tout ce qui vient d'un flux repasse par un échappement à l'affichage |
 | **Liens piégés** | Seuls les liens `http(s)` entrent en base ; les liens externes portent `rel="noopener noreferrer"` |
 | **Mot de passe d'administration** | Variable d'environnement, comparaison à temps constant, HTTPS requis en production |
-| **Injection par un titre de flux** dans le modèle de langage | Seul un code de thème de la liste active est accepté en retour, et le modèle est averti que le texte soumis est une donnée. Le pire résultat possible est un mauvais classement. |
+| **Injection par un titre de flux** dans le modèle de langage | Classement : seul un code de thème de la liste active est accepté en retour, le pire résultat possible étant un mauvais classement. Récapitulatif : le modèle est averti que les titres sont des données, le texte rendu est tronqué, échappé à l'affichage, et annoncé comme automatique. |
 | **Clé d'API du modèle** | Variable d'environnement, jamais dans `config/ia.json`, qui est suivi par Git. Le collecteur refuse de démarrer si le fichier est actif et la variable vide. |
 
 Le contrôle DNS est fait au moment de la requête et non à l'enregistrement : une panne de
@@ -550,9 +599,12 @@ Les thèmes ne sont plus codés en dur : voir `config/themes.json`.
   ce qui ne répond toujours pas.
 - Les conditions d'utilisation de chaque source (C03, C04), et celles du fournisseur de
   modèle si le classement par IA est activé.
-- **Le classement par IA sur des données réelles** : il n'a été vérifié que sur des réponses
-  simulées. Après quelques jours, comparer `admin.py ia` et `admin.py a-trier` pour savoir
-  s'il apporte quelque chose, et avec quel taux d'erreur.
+- **Le classement par IA et le récapitulatif sur des données réelles** : ils n'ont été
+  vérifiés que sur des réponses simulées. Après quelques jours, comparer `admin.py ia` et
+  `admin.py a-trier` pour savoir si le classement apporte quelque chose et avec quel taux
+  d'erreur, et relire quelques récapitulatifs pour vérifier qu'ils n'inventent rien.
+- **Les mots-clés de `cyb`** : le thème est neuf, ses 60 mots-clés n'ont jamais tourné sur
+  de vraies dépêches. `admin.py a-trier` dira ce qui lui échappe.
 - Les mots-clés : les enrichir à partir de `admin.py a-trier` après quelques jours.
 - Les cas limites de zones : la Turquie et le Soudan sont en Moyen-Orient et Afrique du Nord,
   le Groenland en Europe.
