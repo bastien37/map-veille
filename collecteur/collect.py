@@ -860,6 +860,19 @@ def main(argv=None):
     base.fin_collecte(cx, collecte, base.maintenant_utc(), len(bruts), compte["nouveau"],
                       compte["regroupe"])
 
+    # Récapitulatif du jour : un appel par thème, une fois toutes les quelques heures.
+    # Il est écrit ici et non à l'affichage : une page qui s'ouvre ne doit jamais déclencher
+    # un appel à un service extérieur.
+    recap = ia.reglages_recap() if classificateur else {"actif": False}
+    if classificateur and recap["actif"]:
+        bilans = ia.recaps_du_jour(cx, base.jour_utc(MAINTENANT),
+                                   ia.rubriques(base.THEMES_DECLARES), classificateur,
+                                   MAINTENANT, recap)
+        cx.commit()
+        ecrits = [b["theme"] for b in bilans if b["etat"] == "ecrit"]
+        if ecrits:
+            print(f"Récap : {len(ecrits)} thèmes résumés ({', '.join(ecrits)}).")
+
     publies = cx.execute("SELECT COUNT(*) FROM fil WHERE date_pub >= ?",
                          ((MAINTENANT - base.DUREE_FIL).isoformat(),)).fetchone()[0]
     a_trier = cx.execute("SELECT COUNT(*) FROM a_trier").fetchone()[0]

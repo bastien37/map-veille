@@ -86,7 +86,7 @@ THEMES = {t["code"]: t["nom"] for t in THEMES_DECLARES}
 THEMES_ACTIFS = [t["code"] for t in THEMES_DECLARES if t["actif"]]
 REGLES_THEMES = {t["code"]: t["mots_cles"] for t in THEMES_DECLARES}
 
-VERSION_SCHEMA = 13  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
+VERSION_SCHEMA = 14  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
                     # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs,
                     # pause_jusqu_a ; v7 : themes.actif/ordre, sources.langue/frequence/theme/
                     # origine ; v8 : articles.lat/lon/lieu, table lieux_geocodes ;
@@ -94,7 +94,8 @@ VERSION_SCHEMA = 13  # v2 : articles.masque ; v3 : table sources ; v4 : collecte
                     # v10 : index couvrant idx_evenements_fil ;
                     # v11 : articles.langue, evenements.langues ;
                     # v12 : idx_evenements_carte porte aussi langues, lieu et titre ;
-                    # v13 : articles.theme_ia, table themes_ia
+                    # v13 : articles.theme_ia, table themes_ia ;
+                    # v14 : table recaps
 
 TYPES_SOURCES = {
     "rss": "Flux RSS / Atom",
@@ -184,6 +185,19 @@ CREATE TABLE IF NOT EXISTS evenements (
 -- v8 : cache de géocodage. Les conditions d'usage de Nominatim l'imposent, et de toute
 -- façon un lieu ne doit jamais être demandé deux fois. Les échecs sont mémorisés aussi,
 -- sans quoi les mêmes introuvables repartiraient à chaque collecte.
+-- v14 : récapitulatif du jour écrit par le modèle de langage, un par thème. Stocké et
+-- non recalculé à la demande : une page qui s'affiche ne doit jamais déclencher un appel
+-- à un service extérieur, encore moins un par visiteur.
+CREATE TABLE IF NOT EXISTS recaps (
+    jour        TEXT NOT NULL,     -- AAAA-MM-JJ, en UTC comme tout le reste
+    theme       TEXT NOT NULL,     -- code de thème
+    texte       TEXT NOT NULL,
+    modele      TEXT NOT NULL,
+    nb_articles INTEGER NOT NULL,  -- articles résumés : sert à savoir s'il faut refaire
+    maj         TEXT NOT NULL,
+    PRIMARY KEY (jour, theme)
+);
+
 -- v13 : cache du classement par modèle de langage. Même règle que pour le géocodage :
 -- une question posée une fois ne doit jamais être reposée. La clé contient le modèle et la
 -- liste des thèmes, parce qu'en changer change la question.
@@ -464,11 +478,18 @@ def fin_collecte(cx, collecte_id: int, fin: datetime, nb_lus: int, nb_nouveaux: 
     cx.commit()
 
 
+DUREE_RECAPS = timedelta(days=90)   # les récapitulatifs survivent aux articles qu'ils résument
+
+
 def purger(cx, maintenant: datetime, collecte_id: int = None) -> int:
     """D05 : supprime définitivement les articles publiés il y a plus de 30 jours
     (y compris ceux classés à la main ou masqués). Renvoie le nombre d'articles supprimés.
     Les événements qui n'ont plus aucune source disparaissent avec eux."""
     limite = (maintenant - DUREE_FIL).isoformat()
+    # Un récapitulatif tient dans quelques lignes et coûte un appel au modèle : le garder
+    # trois mois, bien après les articles, donne une mémoire du mois écoulé pour rien.
+    cx.execute("DELETE FROM recaps WHERE jour < ?",
+               ((maintenant - DUREE_RECAPS).strftime("%Y-%m-%d"),))
     n = cx.execute("DELETE FROM articles WHERE date_pub < ?", (limite,)).rowcount
     cx.execute("DELETE FROM evenements WHERE id NOT IN "
                "(SELECT evenement_id FROM articles WHERE evenement_id IS NOT NULL)")
@@ -662,6 +683,61 @@ def enregistrer(cx, a: dict, titre_norm: str, maintenant: datetime, collecte_id:
          a.get("langue") or "fr", 1 if a.get("theme_ia") else 0))
     rafraichir_evenement(cx, evenement_id)
     return "nouveau" if premier else "regroupe"
+
+
+def jour_utc(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%d")
+
+
+def articles_du_jour(cx, jour: str, theme: str, limite: int = 60) -> list:
+    """Articles publiables d'un thème pour une journée, du plus récent au plus ancien.
+
+    Les bornes sont lexicographiques sur la date ISO, ce qui laisse l'index sur date_pub
+    travailler : « 2026-10-28T09:00:00+00:00 » est bien entre « 2026-10-28 » et « 2026-10-29 ».
+    """
+    return cx.execute(
+        "SELECT titre, source, lieu, langue FROM fil "
+        "WHERE theme = ? AND date_pub >= ? AND date_pub < ? "
+        "ORDER BY date_pub DESC LIMIT ?",
+        (theme, jour, jour + "z", limite)).fetchall()
+
+
+def compter_articles_du_jour(cx, jour: str, theme: str) -> int:
+    return cx.execute("SELECT COUNT(*) FROM fil WHERE theme = ? AND date_pub >= ? "
+                      "AND date_pub < ?", (theme, jour, jour + "z")).fetchone()[0]
+
+
+def lire_recap(cx, jour: str, theme: str):
+    return cx.execute("SELECT * FROM recaps WHERE jour = ? AND theme = ?",
+                      (jour, theme)).fetchone()
+
+
+def lister_recaps(cx, jour: str, themes=None) -> list:
+    ou, p = "jour = ?", [jour]
+    if themes:
+        ou += f" AND theme IN ({','.join('?' * len(themes))})"
+        p += list(themes)
+    return cx.execute(f"SELECT * FROM recaps WHERE {ou} ORDER BY theme", p).fetchall()
+
+
+def dernier_jour_avec_recap(cx, themes=None) -> str:
+    """Jour le plus récent qui a au moins un récapitulatif — la veille, en début de matinée."""
+    ou, p = "1 = 1", []
+    if themes:
+        ou = f"theme IN ({','.join('?' * len(themes))})"
+        p = list(themes)
+    ligne = cx.execute(f"SELECT MAX(jour) FROM recaps WHERE {ou}", p).fetchone()
+    return ligne[0] if ligne else None
+
+
+TAILLE_MAX_RECAP = 4000   # un récapitulatif plus long qu'une page n'en est plus un
+
+
+def ecrire_recap(cx, jour: str, theme: str, texte: str, modele: str, nb: int,
+                 maintenant: datetime):
+    cx.execute("INSERT OR REPLACE INTO recaps (jour, theme, texte, modele, nb_articles, maj) "
+               "VALUES (?, ?, ?, ?, ?, ?)",
+               (jour, theme, texte[:TAILLE_MAX_RECAP], modele, nb, maintenant.isoformat()))
 
 
 def classer_a_la_main(cx, article_id: int, zone: str, theme: str, maintenant: datetime) -> bool:

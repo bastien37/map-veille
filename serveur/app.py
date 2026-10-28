@@ -468,6 +468,32 @@ async def direct(requete: Request):
     })
 
 
+@app.get("/api/recap", summary="Récapitulatif quotidien par thème, écrit par un modèle de langage")
+def recap(requete: Request, jour: Optional[str] = None, theme: Optional[str] = None,
+          themes: Optional[str] = None, cx: sqlite3.Connection = Depends(connexion)):
+    """Les récapitulatifs déjà écrits et rangés en base. Cette route ne calcule rien et
+    n'appelle aucun service extérieur : c'est la collecte qui les écrit.
+
+    Sans `jour`, la journée la plus récente qui en a — en début de matinée, c'est la veille.
+    """
+    codes = themes_demandes(theme, themes)
+    if jour is not None:
+        if len(jour) != 10 or jour[4] != "-" or jour[7] != "-" or not jour.replace("-", "").isdigit():
+            raise HTTPException(422, f"Date attendue au format AAAA-MM-JJ, reçu : {jour}")
+    else:
+        jour = base.dernier_jour_avec_recap(cx, codes)
+    if not jour:
+        return avec_cache({"jour": None, "recaps": []}, CACHE_FIL, requete)
+    noms = {t["code"]: t["nom"] for t in base.THEMES_DECLARES}
+    rang = {t["code"]: i for i, t in enumerate(base.THEMES_DECLARES)}   # ordre d'affichage
+    recaps = [{"theme": r["theme"], "nom": noms.get(r["theme"], r["theme"]),
+               "texte": r["texte"], "nb_articles": r["nb_articles"],
+               "modele": r["modele"], "maj": r["maj"]}
+              for r in sorted(base.lister_recaps(cx, jour, codes),
+                              key=lambda r: rang.get(r["theme"], 10**6))]
+    return avec_cache({"jour": jour, "recaps": recaps}, CACHE_FIL, requete)
+
+
 @app.get("/api/collectes", summary="Journal des dernières collectes et état des sources")
 def collectes(limite: int = Query(5, ge=1, le=50), cx: sqlite3.Connection = Depends(connexion)):
     sortie = []

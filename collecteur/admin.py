@@ -7,6 +7,7 @@ MAP – Outil d'administration de la base SQLite.
     uv run collecteur/admin.py verifier-flux             # quelles sources répondent vraiment
     uv run collecteur/admin.py verifier-flux --decouvrir # et cherche l'adresse de celles qui échouent
     uv run collecteur/admin.py ia                        # ce que le modèle de langage a classé
+    uv run collecteur/admin.py recap                     # récapitulatif du jour, thème par thème
     uv run collecteur/admin.py a-trier                   # articles que le tri n'a pas su classer
     uv run collecteur/admin.py classer 42 asi def        # classe l'article 42 à la main
     uv run collecteur/admin.py chercher "Taïwan"         # recherche dans les titres
@@ -294,6 +295,56 @@ def cmd_ia(cx, args):
         print("  aucun.")
 
 
+def cmd_recap(cx, args):
+    """Montre — et, si le modèle est actif, écrit — le récapitulatif d'une journée.
+
+    Sans modèle configuré la commande reste utile : elle affiche ce qui est déjà en base.
+    """
+    import ia
+    jour = args.jour or base.jour_utc(base.maintenant_utc())
+    if len(jour) != 10 or jour[4] != "-" or jour[7] != "-":
+        sys.exit(f"--jour attend une date AAAA-MM-JJ, reçu « {jour} ».")
+    themes = ia.rubriques(base.THEMES_DECLARES)
+    if args.theme:
+        if args.theme not in themes:
+            sys.exit(f"Thème inconnu : {args.theme}. Actifs : {' '.join(themes)}")
+        themes = {args.theme: themes[args.theme]}
+
+    try:
+        classificateur = ia.charger_classificateur()
+    except ValueError as e:
+        print(f"config/ia.json : {e}\n")
+        classificateur = None
+    if classificateur:
+        bilans = ia.recaps_du_jour(cx, jour, themes, classificateur, base.maintenant_utc(),
+                                   ia.reglages_recap(), args.refaire)
+        cx.commit()
+        ecrits = [b for b in bilans if b["etat"] == "ecrit"]
+        rates = [b for b in bilans if b["etat"] == "echec"]
+        print(f"{len(ecrits)} récapitulatifs écrits, "
+              f"{len([b for b in bilans if b['etat'] == 'inchange'])} inchangés, "
+              f"{len([b for b in bilans if b['etat'] == 'vide'])} sans article, "
+              f"{len(rates)} en échec.\n")
+        if rates and classificateur.derniere_erreur:
+            print(f"Dernière erreur : {classificateur.derniere_erreur}\n")
+    else:
+        print("Modèle de langage inactif : affichage de ce qui est déjà en base.")
+        print("Pour en écrire de nouveaux, voir config/ia.json.\n")
+
+    lignes = base.lister_recaps(cx, jour, list(themes))
+    if not lignes:
+        print(f"Aucun récapitulatif pour le {jour}.")
+        return
+    print(f"Récapitulatif du {jour}\n" + "=" * (len(jour) + 18))
+    for r in lignes:
+        print(f"\n## {base.THEMES.get(r['theme'], r['theme'])}  "
+              f"({r['nb_articles']} articles, {r['modele']}, "
+              f"maj {r['maj'][:16].replace('T', ' ')} UTC)")
+        for paragraphe in r["texte"].split("\n"):
+            print("  " + paragraphe.strip() if paragraphe.strip() else "")
+    print("\nTexte écrit par un modèle de langage à partir des seuls titres du jour.")
+
+
 def cmd_chercher(cx, args):
     motif = f"%{base_norm(args.texte)}%"
     lignes = cx.execute("SELECT * FROM articles WHERE titre_norm LIKE ? ORDER BY date_pub DESC LIMIT ?",
@@ -333,6 +384,11 @@ def main(argv=None):
                    help="reporter les adresses trouvées et les vérifications dans config/flux.json")
     p = sous.add_parser("ia", help="état du classement par modèle de langage")
     p.add_argument("--limite", type=int, default=15)
+    p = sous.add_parser("recap", help="récapitulatif quotidien par thème")
+    p.add_argument("--jour", help="journée à résumer, AAAA-MM-JJ (défaut : aujourd'hui, UTC)")
+    p.add_argument("--theme", help="un seul thème")
+    p.add_argument("--refaire", action="store_true",
+                   help="réécrire même si un récapitulatif existe déjà")
     p = sous.add_parser("a-trier", help="articles non classés")
     p.add_argument("--limite", type=int, default=50)
     p = sous.add_parser("chercher", help="recherche dans les titres")
@@ -346,7 +402,7 @@ def main(argv=None):
 
     cx = base.ouvrir(args.base)
     {"stats": cmd_stats, "config": cmd_config, "verifier-flux": cmd_verifier_flux,
-     "ia": cmd_ia, "a-trier": cmd_a_trier, "chercher": cmd_chercher,
+     "ia": cmd_ia, "recap": cmd_recap, "a-trier": cmd_a_trier, "chercher": cmd_chercher,
      "classer": cmd_classer}[args.commande](cx, args)
     cx.close()
 
