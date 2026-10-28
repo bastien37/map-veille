@@ -62,8 +62,10 @@ await page.goto(URL, { waitUntil: 'load' });
 await page.waitForTimeout(1200);
 
 console.log('\n--- navigation au clavier ---');
+// on tabule jusqu'à atteindre la carte plutôt qu'un nombre fixe de fois : chaque thème
+// ajouté en met deux de plus devant elle, et un plafond figé finirait par la rater.
 const ordre = [];
-for (let i = 0; i < 18; i++) {
+for (let i = 0; i < 60 && !ordre.includes('carte-points'); i++) {
   await page.keyboard.press('Tab');
   ordre.push(await page.evaluate(() => {
     const e = document.activeElement;
@@ -71,7 +73,8 @@ for (let i = 0; i < 18; i++) {
       : (e.id || e.textContent?.trim().slice(0, 24) || e.tagName).replace(/\s+/g, ' ');
   }));
 }
-console.log('  ' + ordre.join(' → '));
+console.log('  ' + ordre.slice(0, 16).join(' → ')
+            + (ordre.length > 16 ? ` → … (${ordre.length} arrêts en tout)` : ''));
 verdict(ordre.some(o => /Carte|Liste seule/.test(o)), 'les boutons de vue sont atteignables');
 verdict(ordre.some(o => /jours|24 h/.test(o)), 'les boutons de période sont atteignables');
 verdict(ordre.includes('carte-points'), 'la carte est atteignable');

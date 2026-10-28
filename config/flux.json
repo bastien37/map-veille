@@ -487,6 +487,146 @@
       "frequence_minutes": 360,
       "actif": true,
       "notes": "Quincy Institute : critique de la politique étrangère américaine. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "CERT-FR (ANSSI)",
+      "type": "rss",
+      "url": "https://www.cert.ssi.gouv.fr/feed/",
+      "theme": "cyb",
+      "langue": "fr",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Alertes, avis et bulletins officiels du CERT gouvernemental français. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "ANSSI",
+      "type": "rss",
+      "url": "https://cyber.gouv.fr/feed",
+      "theme": "cyb",
+      "langue": "fr",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Agence nationale de la sécurité des systèmes d'information. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "LeMagIT",
+      "type": "rss",
+      "url": "https://www.lemagit.fr/rss/toutes-les-actualites.html",
+      "theme": "cyb",
+      "langue": "fr",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Actualité des systèmes d'information pour les professionnels. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Le Monde Informatique",
+      "type": "rss",
+      "url": "https://www.lemondeinformatique.fr/flux-rss/thematique/toutes-les-actualites/rss.xml",
+      "theme": "cyb",
+      "langue": "fr",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Presse informatique professionnelle. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Next",
+      "type": "rss",
+      "url": "https://next.ink/feed/",
+      "theme": "cyb",
+      "langue": "fr",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Numérique, logiciel libre et libertés (ex-Next INpact). Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "ZATAZ",
+      "type": "rss",
+      "url": "https://www.zataz.com/feed/",
+      "theme": "cyb",
+      "langue": "fr",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Veille sur les fuites de données et la cybercriminalité francophone. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Krebs on Security",
+      "type": "rss",
+      "url": "https://krebsonsecurity.com/feed/",
+      "theme": "cyb",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Enquêtes de Brian Krebs sur la cybercriminalité. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "BleepingComputer",
+      "type": "rss",
+      "url": "https://www.bleepingcomputer.com/feed/",
+      "theme": "cyb",
+      "langue": "en",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Incidents, rançongiciels et correctifs, au jour le jour. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "The Record",
+      "type": "rss",
+      "url": "https://therecord.media/feed",
+      "theme": "cyb",
+      "langue": "en",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Cybersécurité et cyberconflit (Recorded Future News). Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "The Hacker News",
+      "type": "rss",
+      "url": "https://feeds.feedburner.com/TheHackersNews",
+      "theme": "cyb",
+      "langue": "en",
+      "frequence_minutes": 120,
+      "actif": true,
+      "notes": "Vulnérabilités et campagnes d'attaque. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Dark Reading",
+      "type": "rss",
+      "url": "https://www.darkreading.com/rss.xml",
+      "theme": "cyb",
+      "langue": "en",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Sécurité des systèmes d'information en entreprise. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "CISA – avis de sécurité",
+      "type": "rss",
+      "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+      "theme": "cyb",
+      "langue": "en",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Avis officiels de l'agence américaine de cybersécurité. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Schneier on Security",
+      "type": "rss",
+      "url": "https://www.schneier.com/feed/",
+      "theme": "cyb",
+      "langue": "en",
+      "frequence_minutes": 360,
+      "actif": true,
+      "notes": "Analyses de Bruce Schneier sur la sécurité et la cryptographie. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
+    },
+    {
+      "nom": "Ars Technica – sécurité",
+      "type": "rss",
+      "url": "https://feeds.arstechnica.com/arstechnica/security",
+      "theme": "cyb",
+      "langue": "en",
+      "frequence_minutes": 180,
+      "actif": true,
+      "notes": "Enquêtes techniques sur les failles et les incidents. Adresse NON VÉRIFIÉE : voir le commentaire en tête du fichier."
     }
   ]
 }

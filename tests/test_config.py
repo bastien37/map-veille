@@ -51,6 +51,68 @@ def test_le_theme_geopolitique_et_ses_flux_sont_livres():
                for f in geo)
 
 
+def test_le_theme_cybersecurite_et_ses_flux_sont_livres():
+    assert "cyb" in base.THEMES
+    flux = base.lire_config(base.FLUX_JSON, "flux")
+    cyb = [f for f in flux if f.get("theme") == "cyb"]
+    assert {f["nom"] for f in cyb} >= {"CERT-FR (ANSSI)", "Krebs on Security",
+                                       "BleepingComputer", "The Record"}
+    assert {f["langue"] for f in cyb} == {"fr", "en"}
+    assert all("VÉRIFIÉE" in f.get("notes", "") or "confirmer" in f.get("notes", "")
+               for f in cyb)
+
+
+def test_les_mots_cles_cyber_ont_quitte_tec():
+    """Les laisser aux deux endroits ferait gagner « tec » par simple égalité de points."""
+    themes = {t["code"]: t["mots_cles"] for t in base.THEMES_DECLARES}
+    partages = set(themes["tec"]) & set(themes["cyb"])
+    assert not partages, f"mots-clés en double entre tec et cyb : {partages}"
+    assert "cyber*" in themes["cyb"] and "cyber*" not in themes["tec"]
+    assert "espace" in themes["tec"], "tec garde l'espace et les sciences"
+
+
+def test_aucun_mot_cle_n_appartient_a_deux_themes():
+    """Un mot-clé partagé ne départage rien : il donne un point à chacun."""
+    vus, doublons = {}, {}
+    for t in base.THEMES_DECLARES:
+        for mot in t["mots_cles"]:
+            if mot in vus:
+                doublons.setdefault(mot, [vus[mot]]).append(t["code"])
+            vus[mot] = t["code"]
+    assert not doublons, f"mots-clés partagés : {doublons}"
+
+
+def test_aucun_mot_cle_n_est_deja_couvert_par_une_racine_du_meme_theme():
+    """« cyberattaque* » après « cyber* » donne deux points au lieu d'un, pour un seul mot.
+
+    Le tri additionne un point par mot-clé touché : une racine qui couvre déjà un autre
+    mot-clé du même thème gonfle son score sans raison, et fausse les égalités.
+    """
+    couverts = []
+    for t in base.THEMES_DECLARES:
+        mots = [collect.normaliser(m).strip() for m in t["mots_cles"]]
+        racines = [collect.normaliser(m).strip() for m in t["mots_cles"] if m.endswith("*")]
+        couverts += [f"{t['code']}: {m} ⊂ {r}*" for r in racines for m in mots
+                     if m != r and m.startswith(r)]
+    assert not couverts, couverts
+
+
+def test_les_mots_cles_cyb_ne_devorent_pas_les_autres_themes():
+    tables = collect.referentiels()["themes"]
+    for titre, attendu in [
+            ("Rançongiciel : un hôpital de Lyon paralysé", "cyb"),
+            ("Faille de sécurité critique dans OpenSSH", "cyb"),
+            ("Fuite de données chez un opérateur téléphonique", "cyb"),
+            ("Ransomware gang claims attack on a European bank", "cyb"),
+            ("L'ANSSI publie un avis sur une vulnérabilité activement exploitée", "cyb"),
+            # ce qui doit rester ailleurs
+            ("Lancement réussi de la fusée Ariane 6", "tec"),
+            ("Ukraine : frappes de missiles sur Kharkiv", "def"),
+            ("Le président reçoit l'ambassadeur de Chine", "dip"),
+            ("Séisme au Japon, alerte au tsunami", "cli")]:
+        assert collect.classer(titre, "", tables) == attendu, titre
+
+
 def test_les_mots_cles_geo_ne_devorent_pas_les_autres_themes():
     """« geo » marque le registre d'analyse, pas les faits : un missile reste « def »."""
     tables = collect.referentiels()["themes"]
