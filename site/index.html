@@ -180,6 +180,7 @@ const PAS=150;
 let THEMES=[], CARTE=null, fJours=30, limite=PAS, requete=0;
 let fThemes=[];            // thèmes cochés par le visiteur ; vide = tous
 let LANGUES=[], fLangue=null;   // langue choisie ; null = toutes
+let LANGUE_DEFAUT=null;         // langue d'ouverture, venue de config/site.json
 let pageTheme=null;        // code du thème si on est sur /theme/<code>
 const CLE_THEMES="map.themes", CLE_LANGUE="map.langue";
 let vue="points";          // points | zones | liste
@@ -208,6 +209,7 @@ async function api(chemin, params={}){
 // ---------- construction depuis le référentiel ----------
 function construire(ref){
   THEMES=ref.themes; CARTE=ref.carte; LANGUES=ref.langues||[];
+  LANGUE_DEFAUT=ref.langue_par_defaut||null;
   THEMES.forEach(t=>{
     const b=document.createElement("button");
     b.className="chip"; b.textContent=t.nom; b.dataset.t=t.code;
@@ -462,10 +464,14 @@ function replierSurInterrogation(){
   pageTheme = lirePageTheme();
   fThemes = lireMemoire(CLE_THEMES, []);
   fJours = lireMemoire("map.jours", 30);
-  fLangue = lireMemoire(CLE_LANGUE, null);
+  // « undefined » = le visiteur n'a jamais touché aux puces de langue. Une valeur
+  // enregistrée, fût-elle null (« Toutes »), est un choix : elle l'emporte sur la
+  // configuration, qui ne décide que de la première visite.
+  fLangue = lireMemoire(CLE_LANGUE, undefined);
   try{ construire(await api("referentiel")); }catch(e){ erreur(e); return; }
   fThemes = fThemes.filter(c=>THEMES.some(t=>t.code===c));   // un thème peut avoir disparu
   marquerThemes();
+  if(fLangue===undefined)fLangue=LANGUE_DEFAUT;
   if(!LANGUES.some(l=>l.code===fLangue))fLangue=null;   // langue retirée de la configuration
   marquerLangue();
   document.querySelectorAll("#vues .chip[data-jours]").forEach(b=>b.setAttribute("aria-pressed",+b.dataset.jours===fJours));

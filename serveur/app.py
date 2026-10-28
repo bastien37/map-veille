@@ -91,6 +91,10 @@ def avec_cache(contenu, cache: str, requete: Request) -> Response:
 # Accès à la base (lecture seule)
 # ---------------------------------------------------------------------------
 def connexion():
+    # Le serveur tourne des semaines ; la configuration, elle, change. Un thème ajouté
+    # doit apparaître sans redémarrage, sinon ses articles s'affichent avec leur code brut
+    # et personne ne comprend pourquoi. Le contrôle est un stat() sur un fichier.
+    base.recharger_themes_si_modifies()
     if not BASE.exists():
         raise HTTPException(503, "Base de données absente : lancez d'abord le collecteur "
                                  "(uv run collecteur/collect.py).")
@@ -184,7 +188,10 @@ _carte_datee = None
 @app.get("/api/referentiel", summary="Zones (avec leur tracé sur la carte) et thèmes")
 def referentiel(requete: Request, cx: sqlite3.Connection = Depends(connexion)):
     global _referentiel, _carte_datee
-    datee = base.CARTE_JSON.stat().st_mtime_ns
+    # ce qui décide du contenu de cette route ; connexion() a déjà relu les thèmes si
+    # besoin, il reste à savoir si ce qui est en cache date d'avant
+    datee = (base.CARTE_JSON.stat().st_mtime_ns, tuple(base.THEMES_ACTIFS),
+             base.SITE_JSON.stat().st_mtime_ns if base.SITE_JSON.exists() else None)
     if _referentiel is None or datee != _carte_datee:   # fichier modifié : on reconstruit
         _carte_datee = datee
         zones = [{"code": r["code"], "nom": r["nom"]}
@@ -196,9 +203,16 @@ def referentiel(requete: Request, cx: sqlite3.Connection = Depends(connexion)):
         themes = [{"code": t["code"], "nom": t["nom"]}
                   for t in base.THEMES_DECLARES if t["actif"]]
         carte_conf = json.loads(base.CARTE_JSON.read_text(encoding="utf-8"))
+        try:
+            site_conf = base.charger_site()
+        except ValueError:
+            # un réglage d'affichage mal écrit ne doit pas rendre le site inaccessible :
+            # on sert le comportement par défaut, et « admin.py config » montre l'erreur
+            site_conf = dict(base.REGLAGES_SITE)
         corps, etag = serialiser({
             "zones": zones, "themes": themes,
             "langues": [{"code": c, "nom": base.NOMS_LANGUES.get(c, c)} for c in base.LANGUES],
+            "langue_par_defaut": site_conf["langue_par_defaut"],
             "duree_nouveau_heures": int(base.DUREE_NOUVEAU.total_seconds() // 3600),
             "carte": {k: v for k, v in carte_conf.items() if not k.startswith("_")}})
         _referentiel = (corps, gzip.compress(corps, 6), etag)

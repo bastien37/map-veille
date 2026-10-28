@@ -85,11 +85,17 @@ MAP_AUTORISER_RESEAU_LOCAL=1 uv run collecteur/collect.py
 Tout ce qui se règle sans toucher au code est dans `config/`. Chaque fichier porte en tête
 un commentaire qui explique ses champs.
 
+`config/themes.json` et `config/site.json` sont **relus à chaud** : le serveur web tourne des
+semaines, et un thème ajouté doit apparaître sans redémarrage. Sans cela le symptôme est
+déroutant — la puce du thème manque dans la barre, et ses articles s'affichent avec leur code
+(`geo`) au lieu de leur nom. Les autres fichiers sont relus à chaque collecte.
+
 | Fichier | Ce qu'il décrit |
 |---|---|
 | `config/themes.json` | Les thèmes : code, nom, ordre d'affichage, interrupteur, mots-clés de tri |
 | `config/flux.json` | Les sources : nom, type, adresse, thème imposé, langue, fréquence de rafraîchissement |
 | `config/carte.json` | Le fond de carte : serveur de tuiles, attribution, vue initiale, nombre de points |
+| `config/site.json` | L'affichage : langue sur laquelle le site s'ouvre |
 | `config/geocodage.json` | Le service de géocodage extérieur — **désactivé par défaut** |
 | `config/ia.json` | Le modèle de langage qui classe les thèmes douteux — **désactivé par défaut** |
 | `config/exonymes.json` | Les noms français des lieux (Londres, Pékin, Le Caire…) |
@@ -465,7 +471,7 @@ Un article classé à la main n'est plus jamais modifié par le collecteur.
 
 | Route | Paramètres | Réponse |
 |---|---|---|
-| `GET /api/referentiel` | – | Zones, thèmes actifs, réglages de la carte, durée du repère « Nouveau » |
+| `GET /api/referentiel` | – | Zones, thèmes actifs, langues, langue d'ouverture, réglages de la carte |
 | `GET /api/synthese` | `theme`, `themes`, `langue`, `jours`, `zones` | Total, date de la dernière collecte, sources ; comptages par zone si `zones=1` |
 | `GET /api/articles` | `zone`, `theme`, `themes`, `langue`, `jours`, `limite`, `decalage`, `grouper` | Le fil, une ligne par événement par défaut |
 | `GET /api/evenements` | `theme`, `themes`, `zone`, `langue`, `jours`, `bbox`, `limite` | Les points de la carte, les plus suivis d'abord |
@@ -487,6 +493,12 @@ Les réponses sont compressées (gzip) et portent `Cache-Control` et `ETag` : le
 gardé une heure, le fil une minute, et un navigateur à jour reçoit `304`.
 
 ## Le site
+
+**La langue d'ouverture** se règle dans `config/site.json` : le site livré s'ouvre sur le
+français, les sources anglaises continuant d'être collectées et une puce suffisant à les
+afficher. `null` rend toutes les langues d'emblée. Le choix du visiteur l'emporte toujours :
+dès qu'il touche une puce, sa préférence est retenue dans son navigateur — y compris
+« Toutes », qui est un choix comme un autre — et le réglage ne s'applique plus à lui.
 
 En haut, le **récapitulatif du jour** quand il existe : un bloc pliable (`<details>`, donc
 pliable au clavier sans une ligne de JavaScript), une colonne par thème sur grand écran, le

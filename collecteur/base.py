@@ -11,6 +11,7 @@ Module standard sqlite3 : aucune bibliothèque à installer.
 import json
 import re
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -22,6 +23,7 @@ THEMES_JSON = CONFIG / "themes.json"
 GEOCODAGE_JSON = CONFIG / "geocodage.json"
 CARTE_JSON = CONFIG / "carte.json"
 FLUX_JSON = CONFIG / "flux.json"
+SITE_JSON = CONFIG / "site.json"
 DUREE_FIL = timedelta(days=30)   # D05 : durée de conservation ; au-delà, l'article est supprimé à la collecte
 DUREE_NOUVEAU = timedelta(hours=48)   # F06 : repère « Nouveau »
 
@@ -36,6 +38,34 @@ ZONES = {
 
 LANGUES = ("fr", "en")   # langues gérées pour le tri et l'extraction de lieux
 NOMS_LANGUES = {"fr": "Français", "en": "Anglais"}
+
+# Réglages d'affichage du site, par opposition à tout le reste de config/, qui décide de ce
+# qui est collecté. Ils ne changent rien au contenu de la base.
+REGLAGES_SITE = {"langue_par_defaut": None}
+
+
+def charger_site(chemin: Path = None) -> dict:
+    """Lit config/site.json. Fichier absent = valeurs par défaut, et c'est très bien :
+    ces réglages sont des préférences, pas des informations nécessaires."""
+    chemin = Path(chemin or SITE_JSON)
+    reglages = dict(REGLAGES_SITE)
+    if chemin.exists():
+        lus = {c: v for c, v in json.loads(chemin.read_text(encoding="utf-8")).items()
+               if not c.startswith("_")}
+        inconnus = set(lus) - set(REGLAGES_SITE)
+        if inconnus:
+            raise ValueError(f"config/site.json : réglages inconnus "
+                             f"{', '.join(sorted(inconnus))}. Attendus : "
+                             f"{', '.join(REGLAGES_SITE)}.")
+        reglages.update(lus)
+    langue = reglages["langue_par_defaut"]
+    if langue in ("", "toutes"):
+        langue = None
+    if langue is not None and langue not in LANGUES:
+        raise ValueError(f"config/site.json : langue_par_defaut « {langue} » inconnue. "
+                         f"Valeurs possibles : {', '.join(LANGUES)}, ou null pour toutes.")
+    reglages["langue_par_defaut"] = langue
+    return reglages
 FREQUENCE_DEFAUT = 60    # minutes entre deux interrogations d'une source
 
 
@@ -85,6 +115,50 @@ THEMES_DECLARES = charger_themes()
 THEMES = {t["code"]: t["nom"] for t in THEMES_DECLARES}
 THEMES_ACTIFS = [t["code"] for t in THEMES_DECLARES if t["actif"]]
 REGLES_THEMES = {t["code"]: t["mots_cles"] for t in THEMES_DECLARES}
+
+
+def _empreinte_themes():
+    """Date et taille de config/themes.json. Un stat() coûte une microseconde."""
+    try:
+        etat = Path(THEMES_JSON).stat()
+        return (etat.st_mtime_ns, etat.st_size)
+    except OSError:
+        return None
+
+
+_empreinte_chargee = _empreinte_themes()
+_verrou_themes = threading.Lock()
+
+
+def recharger_themes_si_modifies() -> bool:
+    """Relit config/themes.json s'il a changé depuis le chargement. Renvoie vrai si oui.
+
+    Le collecteur relit la configuration à chaque passage, mais le serveur web est un
+    processus qui tourne des semaines : sans cela, un thème ajouté n'apparaissait sur le
+    site qu'au redémarrage suivant, et d'ici là ses articles s'affichaient avec leur code
+    brut (« geo ») au lieu de leur nom. Le symptôme était silencieux et déroutant.
+
+    Un fichier invalide ne casse rien : on garde la configuration en place et on laisse
+    l'erreur au collecteur, qui lui doit s'arrêter dessus.
+    """
+    global THEMES_DECLARES, THEMES, THEMES_ACTIFS, REGLES_THEMES, _empreinte_chargee
+    empreinte = _empreinte_themes()
+    if empreinte is None or empreinte == _empreinte_chargee:
+        return False
+    with _verrou_themes:
+        if empreinte == _empreinte_chargee:    # un autre fil vient de le faire
+            return False
+        try:
+            declares = charger_themes()
+        except (ValueError, OSError):
+            _empreinte_chargee = empreinte     # ne pas réessayer à chaque requête
+            return False
+        THEMES_DECLARES = declares
+        THEMES = {t["code"]: t["nom"] for t in declares}
+        THEMES_ACTIFS = [t["code"] for t in declares if t["actif"]]
+        REGLES_THEMES = {t["code"]: t["mots_cles"] for t in declares}
+        _empreinte_chargee = empreinte
+        return True
 
 VERSION_SCHEMA = 15  # v2 : articles.masque ; v3 : table sources ; v4 : collectes.nb_supprimes ;
                     # v5 : index couvrants ; v6 : sources.etag, derniere_modif, echecs,

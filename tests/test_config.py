@@ -323,3 +323,75 @@ def test_source_pas_encore_due(cx):
     s["frequence_minutes"] = 5
     s["dernier_succes"] = (maintenant - timedelta(minutes=10)).isoformat()
     assert base.source_a_rafraichir(s, maintenant)
+
+
+# ---------- le serveur suit la configuration sans redémarrer ----------
+@pytest.fixture
+def themes_isoles(tmp_path, monkeypatch):
+    """Rend un fichier de thèmes jetable, et remet la configuration du dépôt après coup.
+
+    Le rechargement écrit dans des variables de module : sans ce filet, un test qui
+    change les thèmes les change pour tous ceux qui suivent.
+    """
+    garde = (base.THEMES_DECLARES, base.THEMES, base.THEMES_ACTIFS, base.REGLES_THEMES,
+             base._empreinte_chargee)
+    fichier = tmp_path / "themes.json"
+    monkeypatch.setattr(base, "THEMES_JSON", fichier)
+    monkeypatch.setattr(base, "_empreinte_chargee", None)
+    yield fichier
+    (base.THEMES_DECLARES, base.THEMES, base.THEMES_ACTIFS, base.REGLES_THEMES,
+     base._empreinte_chargee) = garde
+
+
+def ecrire_themes(fichier, *codes):
+    fichier.write_text(json.dumps({"themes": [
+        {"code": c, "nom": c.upper(), "ordre": i, "mots_cles": [c]}
+        for i, c in enumerate(codes)]}), encoding="utf-8")
+
+
+def test_un_theme_ajoute_apparait_sans_redemarrer(themes_isoles, tmp_path, monkeypatch):
+    """Le collecteur relit la configuration à chaque passage ; le serveur, lui, tourne des
+    semaines. Sans rechargement, un thème ajouté n'apparaissait qu'au redémarrage suivant,
+    et d'ici là ses articles s'affichaient avec leur code brut au lieu de leur nom."""
+    import time
+    from fastapi.testclient import TestClient
+    from serveur import app as serveur
+
+    ecrire_themes(themes_isoles, "aaa")
+    monkeypatch.setattr(serveur, "BASE", tmp_path / "map.sqlite")
+    base.ouvrir(tmp_path / "map.sqlite").close()
+    serveur._referentiel = None
+    client = TestClient(serveur.app)
+    assert [t["code"] for t in client.get("/api/referentiel").json()["themes"]] == ["aaa"]
+
+    time.sleep(0.01)
+    ecrire_themes(themes_isoles, "aaa", "bbb")
+    servis = client.get("/api/referentiel").json()["themes"]
+    assert [t["code"] for t in servis] == ["aaa", "bbb"]
+    assert base.THEMES["bbb"] == "BBB"
+    # et le nouveau code est accepté par les routes qui valident les thèmes
+    assert client.get("/api/articles", params={"themes": "bbb"}).status_code == 200
+    serveur._referentiel = None
+
+
+def test_un_fichier_devenu_invalide_ne_casse_pas_le_serveur(themes_isoles):
+    """Mieux vaut servir l'ancienne configuration que renvoyer 500 à tous les visiteurs :
+    l'erreur, c'est au collecteur de s'arrêter dessus."""
+    import time
+    ecrire_themes(themes_isoles, "aaa")
+    assert base.recharger_themes_si_modifies()
+    avant = dict(base.THEMES)
+    time.sleep(0.01)
+    themes_isoles.write_text("{ceci n'est pas du JSON", encoding="utf-8")
+    assert base.recharger_themes_si_modifies() is False
+    assert base.THEMES == avant
+    assert base.recharger_themes_si_modifies() is False, "ne pas réessayer à chaque requête"
+
+
+def test_sans_changement_rien_n_est_relu(themes_isoles, monkeypatch):
+    def interdit(*a, **k):
+        raise AssertionError("le fichier ne doit pas être relu s'il n'a pas changé")
+    ecrire_themes(themes_isoles, "aaa")
+    base.recharger_themes_si_modifies()        # met l'empreinte à jour
+    monkeypatch.setattr(base, "charger_themes", interdit)
+    assert base.recharger_themes_si_modifies() is False

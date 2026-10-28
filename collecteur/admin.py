@@ -84,6 +84,13 @@ def cmd_config(cx, args):
     if inactifs:
         print(f"  (thèmes désactivés encore présents en base : {', '.join(inactifs)})")
 
+    print(f"\nAffichage du site, d'après {base.SITE_JSON.relative_to(base.RACINE)} :")
+    try:
+        for cle, valeur in base.charger_site().items():
+            print(f"  {cle:20} {valeur if valeur is not None else '(toutes)'}")
+    except ValueError as e:
+        print(f"  ERREUR — {e}\n  Le site sert le réglage par défaut en attendant.")
+
     print(f"\nSources d'après {base.FLUX_JSON.relative_to(base.RACINE)} :")
     print(f"  {'nom':34}{'type':11}{'lg':4}{'fréq':>6}  {'thème':7}{'origine':9}actif")
     for s in base.lister_sources(cx):

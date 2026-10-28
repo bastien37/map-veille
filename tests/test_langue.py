@@ -4,6 +4,7 @@ La langue vient de la source (config/flux.json), pas d'une détection sur le tex
 flux de l'IFRI est en français, un flux de War on the Rocks en anglais, et c'est écrit dans
 la configuration. L'article la porte, l'événement porte l'ensemble de celles de ses sources.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -191,3 +192,56 @@ def test_deux_langues_font_deux_evenements(cx, gaz, ref):
                        "ORDER BY nb_sources DESC").fetchall()
     assert len(lagos) == 2, "comportement attendu aujourd'hui, pas un objectif"
     assert {l["langues"] for l in lagos} == {",fr,", ",en,"}
+
+
+# ---------- langue d'ouverture (config/site.json) ----------
+def ecrire_site(tmp_path, **champs):
+    f = tmp_path / "site.json"
+    f.write_text(json.dumps(champs, ensure_ascii=False), encoding="utf-8")
+    return f
+
+
+def test_le_fichier_livre_ouvre_sur_le_francais():
+    assert base.charger_site()["langue_par_defaut"] == "fr"
+
+
+def test_fichier_absent_vaut_toutes_les_langues(tmp_path):
+    assert base.charger_site(tmp_path / "rien.json")["langue_par_defaut"] is None
+
+
+@pytest.mark.parametrize("valeur, attendu", [("fr", "fr"), ("en", "en"),
+                                             (None, None), ("", None), ("toutes", None)])
+def test_valeurs_acceptees(tmp_path, valeur, attendu):
+    f = ecrire_site(tmp_path, langue_par_defaut=valeur)
+    assert base.charger_site(f)["langue_par_defaut"] == attendu
+
+
+def test_langue_inconnue_refusee(tmp_path):
+    with pytest.raises(ValueError, match="langue_par_defaut"):
+        base.charger_site(ecrire_site(tmp_path, langue_par_defaut="klingon"))
+
+
+def test_reglage_inconnu_refuse(tmp_path):
+    with pytest.raises(ValueError, match="réglages inconnus"):
+        base.charger_site(ecrire_site(tmp_path, couleur="rouge"))
+
+
+def test_l_api_annonce_la_langue_d_ouverture(client):
+    assert client.get("/api/referentiel").json()["langue_par_defaut"] == "fr"
+
+
+def test_un_reglage_casse_ne_rend_pas_le_site_inaccessible(client, monkeypatch, tmp_path):
+    """Une faute de frappe dans un réglage d'affichage ne doit pas renvoyer 500 à tous."""
+    monkeypatch.setattr(base, "SITE_JSON", ecrire_site(tmp_path, langue_par_defaut="klingon"))
+    serveur._referentiel = None
+    r = client.get("/api/referentiel")
+    assert r.status_code == 200 and r.json()["langue_par_defaut"] is None
+    serveur._referentiel = None
+
+
+def test_le_front_applique_la_langue_d_ouverture(client):
+    page = client.get("/").text
+    assert "LANGUE_DEFAUT" in page
+    # un choix déjà fait par le visiteur, « Toutes » compris, l'emporte sur la configuration
+    assert "lireMemoire(CLE_LANGUE, undefined)" in page
+    assert "if(fLangue===undefined)fLangue=LANGUE_DEFAUT" in page
