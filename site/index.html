@@ -4,12 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MAP – Carte de veille</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<!-- Polices chargées sans bloquer le rendu : media="print" puis bascule à onload. Les piles
+     de repli système (voir --display, --body, --mono) s'affichent en attendant. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"></noscript>
 <style>
 /* Layout : tableau de situation — carte des 6 zones à gauche, fil filtré à droite ; empilé sur téléphone */
 :root{
   --bg:#eef1f4; --panel:#ffffff; --ink:#14213a; --muted:#5b6679; --line:#d5dbe3;
-  --land:#dfe4ea; --heat1:#c9d6ea; --heat2:#8fa9d3; --heat3:#4f73b3; --heat4:#1f4690;
+  --land:#dfe4ea; --amas2:#4f73b3; --amas3:#1f4690;
   --accent:#1f4690; --new:#c2410c; --newbg:#fff1e8; --sea:#f7f9fb;
   --display:"Saira Condensed","Arial Narrow",sans-serif;
   --body:"IBM Plex Sans",system-ui,sans-serif;
@@ -17,11 +23,11 @@
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0f1522; --panel:#161e2e; --ink:#e6ebf3; --muted:#9aa6ba; --line:#2a3447;
-  --land:#232d40; --heat1:#253c63; --heat2:#2f5594; --heat3:#4b78c4; --heat4:#86a8e6;
+  --land:#232d40; --amas2:#4b78c4; --amas3:#86a8e6;
   --accent:#86a8e6; --new:#fb9a5b; --newbg:#3a2316; --sea:#121a28; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0f1522; --panel:#161e2e; --ink:#e6ebf3; --muted:#9aa6ba; --line:#2a3447;
-  --land:#232d40; --heat1:#253c63; --heat2:#2f5594; --heat3:#4b78c4; --heat4:#86a8e6;
+  --land:#232d40; --amas2:#4b78c4; --amas3:#86a8e6;
   --accent:#86a8e6; --new:#fb9a5b; --newbg:#3a2316; --sea:#121a28; color-scheme:dark}
 *{box-sizing:border-box}
 html,body{margin:0}
@@ -37,26 +43,58 @@ h1 span{font-weight:500;color:var(--muted);font-size:1.15rem;letter-spacing:.04e
 .bar .lbl{font-family:var(--display);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:.85rem;color:var(--muted);margin-right:4px}
 .chip{font:inherit;font-size:.85rem;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:5px 11px;border-radius:999px;cursor:pointer}
 .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--panel)}
-.chip:focus-visible,.zone:focus-visible,.reset:focus-visible{outline:2px solid var(--new);outline-offset:2px}
+.chip:focus-visible,.reset:focus-visible{outline:2px solid var(--new);outline-offset:2px}
+.bandeau{margin:0;font-family:var(--display);font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;font-size:.85rem;color:var(--accent)}
+/* cibles tactiles : au moins 24 px de haut (WCAG 2.2, 2.5.8). Les marges négatives
+   compensent le remplissage pour que la mise en page ne bouge pas. */
+.lien-theme{font-family:var(--mono);font-size:.68rem;color:var(--muted);text-decoration:underline;
+  text-underline-offset:3px;align-self:center;padding:4px 6px;margin:0 6px 0 -4px;
+  display:inline-flex;align-items:center;min-height:24px}
+.lien-theme:hover,.lien-theme:focus-visible{color:var(--accent)}
 .reset{font:inherit;font-size:.85rem;font-weight:600;background:none;border:none;color:var(--accent);cursor:pointer;padding:5px 4px;margin-left:auto;text-decoration:underline;text-underline-offset:3px}
+/* récapitulatif quotidien : <details> natif, donc pliable au clavier sans une ligne de JS */
+.recap{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:0 16px}
+.recap[open]{padding-bottom:14px}
+.recap summary{padding:12px 0;cursor:pointer;min-height:24px}
+.recap summary h2{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0;
+  font-family:var(--display);font-weight:700;font-size:1.05rem;letter-spacing:.02em}
+.recap summary:focus-visible{outline:2px solid var(--new);outline-offset:2px}
+.recap summary .quand{font-family:var(--mono);font-size:.74rem;font-weight:400;color:var(--muted)}
+/* au-delà de deux thèmes, une seule colonne laisserait la moitié de la largeur vide */
+.recap-corps{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:2px 32px}
+.recap h3{font-family:var(--display);font-size:.95rem;letter-spacing:.03em;text-transform:uppercase;
+  color:var(--accent);margin:14px 0 4px}
+.recap p{margin:0;font-size:.92rem;line-height:1.55;max-width:80ch}
+.recap .signature{margin-top:14px;font-family:var(--mono);font-size:.72rem;color:var(--muted);
+  border-top:1px solid var(--line);padding-top:10px;max-width:none}
 .grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:16px;align-items:start}
 .mapbox{background:var(--sea);border:1px solid var(--line);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px;min-width:0}
-svg{display:block;width:100%;height:auto}
-.zone path.z{fill:var(--land);stroke:var(--bg);stroke-width:.8;transition:fill .2s}
-.zone path.m{fill:none;stroke:var(--bg);stroke-width:.4;opacity:.7;pointer-events:none}
-.zone{cursor:pointer;outline:none}
-.zone[data-h="1"] path.z{fill:var(--heat1)}.zone[data-h="2"] path.z{fill:var(--heat2)}.zone[data-h="3"] path.z{fill:var(--heat3)}.zone[data-h="4"] path.z{fill:var(--heat4)}
-.zone:hover path.z{filter:brightness(1.08)}
-.zone.sel path.z{stroke:var(--ink);stroke-width:1.6}
-.map.hasSel .zone:not(.sel){opacity:.45}
-.tag rect{fill:var(--panel);stroke:var(--line)}
-.tag text{font-family:var(--display);fill:var(--ink)}
-.tag .n{font-weight:700;font-size:17px}.tag .t{font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;fill:var(--muted)}
-.tag .nw{fill:var(--new);font-weight:700;font-size:11px}
-.tag{pointer-events:none}
-.legend{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;font-size:.78rem;color:var(--muted);font-family:var(--mono)}
-.scale{display:flex;gap:2px}.scale i{width:22px;height:10px;display:block}
-.zonelist{display:none;flex-wrap:wrap;gap:6px}
+/* carte à points */
+.carte{height:min(68vh,640px);min-height:340px;border-radius:4px;background:var(--land);z-index:0}
+.carte:focus-visible{outline:2px solid var(--new);outline-offset:2px}
+.etat{margin:0;font-family:var(--mono);font-size:.78rem;color:var(--muted);min-height:1.2em}
+.leaflet-container{font:inherit;background:var(--land)}
+.leaflet-popup-content-wrapper,.leaflet-control-attribution{background:var(--panel);color:var(--ink)}
+.leaflet-control-attribution a{color:var(--accent)}
+.leaflet-bar a{background:var(--panel);color:var(--ink);border-bottom-color:var(--line)}
+.leaflet-bar a:hover{background:var(--bg)}
+.agregat div{width:36px;height:36px;margin:2px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:var(--accent);color:var(--panel);font-family:var(--display);font-weight:700;border:2px solid var(--panel)}
+.agregat-moyen div{width:42px;height:42px;background:var(--amas2)}
+.agregat-grand div{width:50px;height:50px;background:var(--amas3);font-size:1.05rem}
+/* panneau des sources d'un événement */
+#panneau{border-bottom:1px solid var(--line);background:var(--bg)}
+.panneau-tete{padding:12px 16px;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+.panneau-tete h3{font-family:var(--display);font-size:1.15rem;margin:0;flex:1 1 auto}
+.panneau-tete p{margin:0;font-family:var(--mono);font-size:.76rem;color:var(--muted);flex:1 1 100%}
+.sources{list-style:none;margin:0;padding:0;max-height:46vh;overflow-y:auto}
+.sources li{padding:10px 16px;border-top:1px solid var(--line)}
+.sources h4{font-size:.94rem;font-weight:600;margin:0 0 3px;line-height:1.35}
+.lien-evenement{font:inherit;font-size:.72rem;font-family:var(--mono);background:none;border:none;
+  color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:3px;
+  display:inline-flex;align-items:center;min-height:24px;padding:3px 2px;margin-block:-3px}
+.lien-evenement:focus-visible{outline:2px solid var(--new);outline-offset:2px}
 .feed{background:var(--panel);border:1px solid var(--line);border-radius:6px;display:flex;flex-direction:column;min-width:0;max-height:720px}
 .feedhead{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
 .feedhead h2{font-family:var(--display);font-weight:700;font-size:1.3rem;margin:0;letter-spacing:.02em}
@@ -67,15 +105,15 @@ li:last-child{border-bottom:none}
 .badge{align-self:flex-start;font-family:var(--mono);font-size:.68rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--new);background:var(--newbg);padding:1px 6px;border-radius:3px}
 li h3{font-size:.98rem;font-weight:600;margin:0;line-height:1.35}
 .meta{font-family:var(--mono);font-size:.72rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:2px 10px;font-variant-numeric:tabular-nums}
-.meta a{color:var(--accent)}
+.meta a{color:var(--accent);display:inline-flex;align-items:center;min-height:24px;padding-block:3px;margin-block:-3px}
 .more{align-items:center}
 .empty code{font-family:var(--mono);font-size:.85em}
 .empty{padding:28px 16px;color:var(--muted);text-align:center}
 footer{font-size:.78rem;color:var(--muted);max-width:75ch}
 @media (max-width:820px){
   .grid{grid-template-columns:1fr}
-  .zonelist{display:flex}
-  .tag .t{display:none}
+  .carte{height:56vh;min-height:300px}
+  .sources{max-height:none}
   .feed{max-height:none}
   h1{font-size:2rem}
   .status{align-items:flex-start}
@@ -93,25 +131,35 @@ footer{font-size:.78rem;color:var(--muted);max-width:75ch}
     </div>
   </header>
 
-  <div class="bar" id="themes"><span class="lbl">Thème</span></div>
+  <div class="bar" id="vues">
+    <span class="lbl" id="lbl-vue">Vue</span>
+    <button class="chip" data-vue="points" aria-pressed="true">Carte</button>
+    <button class="chip" data-vue="liste" aria-pressed="false">Liste seule</button>
+    <span class="lbl" id="lbl-periode">Période</span>
+    <button class="chip" data-jours="1" aria-pressed="false">24 h</button>
+    <button class="chip" data-jours="7" aria-pressed="false">7 jours</button>
+    <button class="chip" data-jours="30" aria-pressed="true">30 jours</button>
+    <span class="lbl" id="lbl-langue">Langue</span>
+    <span id="langues"></span>
+  </div>
+
+  <div class="bar" id="themes"><span class="lbl">Thèmes</span></div>
+  <p class="bandeau" id="bandeau-theme" hidden></p>
+
+  <details class="recap" id="recap" hidden></details>
 
   <div class="grid">
-    <section class="mapbox" aria-label="Carte des zones">
-      <svg class="map" id="map" viewBox="0 0 960 480" role="group" aria-label="Carte du monde par zones, cliquez une zone pour filtrer"></svg>
-      <div class="zonelist" id="zonelist"></div>
-      <div class="legend">
-        <span>Nombre d'informations :</span>
-        <span class="scale"><i style="background:var(--land)"></i><i style="background:var(--heat1)"></i><i style="background:var(--heat2)"></i><i style="background:var(--heat3)"></i><i style="background:var(--heat4)"></i></span>
-        <span>peu → beaucoup</span>
-        <span style="color:var(--new)" id="legende-nouveau"></span>
-      </div>
+    <section class="mapbox" id="mapbox" aria-label="Carte">
+      <div class="carte" id="carte-points" tabindex="0"></div>
+      <p class="etat" id="carte-etat" role="status" aria-live="polite"></p>
     </section>
 
     <section class="feed" aria-live="polite">
       <div class="feedhead">
-        <h2 id="ftitle">Toutes les zones</h2>
+        <h2 id="ftitle">Toute l'actualité</h2>
         <p id="fcount"></p>
       </div>
+      <div id="panneau" hidden></div>
       <ol id="list"></ol>
     </section>
   </div>
@@ -121,69 +169,208 @@ footer{font-size:.78rem;color:var(--muted);max-width:75ch}
 
 <script>
 // Aucune donnée dans ce fichier : zones, thèmes, tracé de la carte et actualités viennent de l'API.
-const API="api";   // même serveur que la page (voir serveur/app.py)
+// Racine du site. La page est servie telle quelle sur « / » comme sur « /theme/eco » :
+// sans cela, « api/articles » deviendrait « /theme/api/articles ». Le calcul marche aussi
+// si le site est installé dans un sous-répertoire.
+const RACINE = location.pathname.replace(/theme\/[a-z0-9]+\/?$/, "");
+const API = RACINE + "api";   // même serveur que la page (voir serveur/app.py)
 const PAS=150;
-let ZONES=[], THEMES=[], fZone=null, fTheme=null, limite=PAS, requete=0;
+// la zone reste en base et dans l'administration, mais ne sert plus de filtre public :
+// la carte à points la remplace (voir bancs/DECISION-phase2.md, § 5)
+let THEMES=[], CARTE=null, fJours=30, limite=PAS, requete=0;
+let fThemes=[];            // thèmes cochés par le visiteur ; vide = tous
+let LANGUES=[], fLangue=null;   // langue choisie ; null = toutes
+let LANGUE_DEFAUT=null;         // langue d'ouverture, venue de config/site.json
+let pageTheme=null;        // code du thème si on est sur /theme/<code>
+const CLE_THEMES="map.themes", CLE_LANGUE="map.langue";
+let vue="points";          // points | zones | liste
+let carte=null;            // module site/carte.js, importé à la première vue « points »
 const $=s=>document.querySelector(s);
 const fmtH=d=>new Date(d).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const zNom=c=>(ZONES.find(z=>z.code===c)||{nom:c}).nom, tNom=c=>(THEMES.find(t=>t.code===c)||{nom:c}).nom;
+const tNom=c=>(THEMES.find(t=>t.code===c)||{nom:c}).nom;
+// paramètre « themes » de l'API : la liste cochée, ou rien du tout si elle est vide
+const paramThemes=()=>pageTheme?pageTheme:(fThemes.length?fThemes.join(","):null);
+
+// Mémoire locale des préférences. Peut échouer (navigation privée, stockage bloqué) :
+// le site doit alors marcher pareil, simplement sans se souvenir.
+function lireMemoire(cle, defaut){
+  try{ const v=localStorage.getItem(cle); return v==null?defaut:JSON.parse(v) }catch{ return defaut }
+}
+function ecrireMemoire(cle, valeur){ try{ localStorage.setItem(cle,JSON.stringify(valeur)) }catch{} }
 
 async function api(chemin, params={}){
   const q=new URLSearchParams(Object.entries(params).filter(([,v])=>v!=null&&v!==""));
-  const r=await fetch(`${API}/${chemin}${q.size?"?"+q:""}`,{cache:"no-store"});
+  const r=await fetch(`${API}/${chemin}${q.size?"?"+q:""}`);
   if(!r.ok){let m="HTTP "+r.status;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
   return r.json();
 }
 
-// ---------- construction de la carte à partir du référentiel ----------
-const NS="http://www.w3.org/2000/svg", svg=$("#map");
-const el=(n,a={},p)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e};
-
+// ---------- construction depuis le référentiel ----------
 function construire(ref){
-  ZONES=ref.zones; THEMES=ref.themes;
-  $("#legende-nouveau").textContent=`● Nouveau = ajouté depuis moins de ${ref.duree_nouveau_heures} h`;
-  const tags=el("g");
-  ZONES.forEach(z=>{
-    const g=el("g",{class:"zone",tabindex:"0",role:"button","data-z":z.code},svg);
-    el("title",{},g).textContent=z.nom;
-    el("path",{class:"z",d:z.d},g);
-    if(z.m)el("path",{class:"m",d:z.m},g);
-    g.addEventListener("click",()=>setZone(z.code));
-    g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setZone(z.code)}});
-    const t=el("g",{class:"tag"},tags);
-    z.tag={g:t,rect:el("rect",{rx:4,y:-15,height:22},t),n:el("text",{class:"n",y:2},t),t:el("text",{class:"t",y:1},t),nw:el("text",{class:"nw",y:1},t)};
-    const b=document.createElement("button");b.className="chip";b.textContent=z.nom;b.dataset.z=z.code;b.onclick=()=>setZone(z.code);$("#zonelist").appendChild(b);
+  THEMES=ref.themes; CARTE=ref.carte; LANGUES=ref.langues||[];
+  LANGUE_DEFAUT=ref.langue_par_defaut||null;
+  THEMES.forEach(t=>{
+    const b=document.createElement("button");
+    b.className="chip"; b.textContent=t.nom; b.dataset.t=t.code;
+    b.title=`Afficher ou masquer « ${t.nom} »`;
+    b.onclick=()=>basculerTheme(t.code);
+    $("#themes").appendChild(b);
+    const a=document.createElement("a");
+    a.className="lien-theme"; a.href=`${RACINE}theme/${t.code}`; a.textContent="page";
+    a.title=`Page dédiée au thème « ${t.nom} »`;
+    a.onclick=e=>{e.preventDefault();ouvrirPageTheme(t.code)};
+    $("#themes").appendChild(a);
   });
-  svg.appendChild(tags);
-  THEMES.forEach(t=>{const b=document.createElement("button");b.className="chip";b.textContent=t.nom;b.dataset.t=t.code;b.setAttribute("aria-pressed","false");b.onclick=()=>{fTheme=fTheme===t.code?null:t.code;actualiser()};$("#themes").appendChild(b)});
-  const reset=document.createElement("button");reset.className="reset";reset.textContent="Tout afficher";reset.onclick=()=>{fZone=null;fTheme=null;actualiser()};$("#themes").appendChild(reset);
+  const zl=$("#langues");
+  LANGUES.forEach(l=>{
+    const b=document.createElement("button");
+    b.className="chip"; b.textContent=l.nom; b.dataset.lg=l.code;
+    b.title=`N'afficher que les sources en ${l.nom.toLowerCase()}`;
+    zl.appendChild(b);
+  });
+  const reset=document.createElement("button");
+  reset.className="reset"; reset.textContent="Tous les thèmes";
+  reset.onclick=()=>{fThemes=[];ecrireMemoire(CLE_THEMES,fThemes);if(pageTheme)ouvrirPageTheme(null);else majThemes()};
+  $("#themes").appendChild(reset);
+  marquerThemes();
 }
 
-function setZone(c){fZone=fZone===c?null:c;actualiser()}
-document.addEventListener("click",e=>{if(e.target.id==="plus")afficherPlus()});
+// ---------- bascule carte / liste ----------
+// Le module de carte et Leaflet ne sont téléchargés qu'à la première ouverture de la vue
+// carte : un visiteur qui reste sur la liste ne paie pas ces 60 Kio.
+async function setVue(v){
+  vue=v;
+  document.querySelectorAll("#vues .chip[data-vue]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.vue===v));
+  $("#mapbox").hidden = v==="liste";
+  if(v!=="points"){ fermerPanneau(); return; }
+  try{
+    if(!carte){
+      $("#carte-etat").textContent="Chargement de la carte…";
+      carte=await import(`${RACINE}carte.js`);
+      await carte.creer($("#carte-points"), CARTE, {surSelection:ouvrirEvenement, racine:RACINE});
+    }
+    carte.appliquerFiltres({themes:paramThemes(), jours:fJours, langue:fLangue});
+    carte.invalider();     // le conteneur était caché : Leaflet doit remesurer
+  }catch(e){
+    $("#carte-etat").textContent="La carte n'a pas pu être chargée ; la liste reste disponible.";
+    carte=null;
+  }
+}
+
+// ---------- thèmes : le visiteur coche ceux qu'il veut, et son choix est gardé ----------
+function basculerTheme(code){
+  if(pageTheme)return ouvrirPageTheme(code===pageTheme?null:code);
+  fThemes = fThemes.includes(code) ? fThemes.filter(c=>c!==code) : [...fThemes, code];
+  ecrireMemoire(CLE_THEMES, fThemes);
+  majThemes();
+}
+function majThemes(){
+  marquerThemes();
+  if(carte)carte.appliquerFiltres({themes:paramThemes()});
+  actualiser();
+}
+function marquerThemes(){
+  document.querySelectorAll("#themes .chip").forEach(b=>{
+    const choisi = pageTheme ? b.dataset.t===pageTheme : fThemes.includes(b.dataset.t);
+    b.setAttribute("aria-pressed", choisi);
+  });
+  const tousVisibles = !pageTheme && !fThemes.length;
+  $("#bandeau-theme").hidden = !pageTheme;
+  if(pageTheme)$("#bandeau-theme").textContent=`Page du thème « ${tNom(pageTheme)} »`;
+  document.title = pageTheme ? `${tNom(pageTheme)} – MAP` : "MAP – Carte de veille";
+  $("#themes .reset").hidden = tousVisibles;
+}
+
+// Page d'un thème : une adresse propre, partageable, sans rechargement.
+function ouvrirPageTheme(code){
+  pageTheme = code;
+  history.pushState({theme:code}, "", code ? `${RACINE}theme/${code}` : RACINE);
+  majThemes();
+}
+addEventListener("popstate", e=>{ pageTheme = e.state?.theme ?? lirePageTheme(); majThemes() });
+function lirePageTheme(){
+  const m = location.pathname.match(/\/theme\/([a-z0-9]+)\/?$/);
+  return m ? m[1] : null;
+}
+
+// ---------- langue ----------
+// null = toutes. Un événement relayé en français et en anglais reste visible dans les deux.
+function setLangue(code){
+  fLangue=code;
+  ecrireMemoire(CLE_LANGUE, code);
+  marquerLangue();
+  if(carte)carte.appliquerFiltres({langue:code});
+  actualiser();
+}
+function marquerLangue(){
+  document.querySelectorAll("#langues .chip").forEach(b=>
+    b.setAttribute("aria-pressed", b.dataset.lg===fLangue));
+}
+
+function setJours(j){
+  fJours=j;
+  document.querySelectorAll("#vues .chip[data-jours]").forEach(b=>b.setAttribute("aria-pressed",+b.dataset.jours===j));
+  ecrireMemoire("map.jours", j);
+  if(carte)carte.appliquerFiltres({jours:j});
+  actualiser();
+}
+
+// ---------- panneau des sources d'un événement ----------
+async function ouvrirEvenement(id){
+  const p=$("#panneau");
+  p.hidden=false; p.innerHTML='<div class="panneau-tete"><h3>Chargement…</h3></div>';
+  try{
+    const e=await carte.chargerEvenement(id);
+    p.innerHTML=carte.htmlPanneau(e);
+    p.querySelector("#fermer-panneau")?.focus();
+  }catch(err){
+    p.innerHTML=`<div class="panneau-tete"><h3>Sources indisponibles</h3>
+      <p>${esc(err.message)}</p><button class="chip" id="fermer-panneau">Fermer</button></div>`;
+  }
+}
+function fermerPanneau(){const p=$("#panneau");p.hidden=true;p.innerHTML=""}
+
+document.addEventListener("click",e=>{
+  if(e.target.id==="plus")afficherPlus();
+  if(e.target.id==="fermer-panneau")fermerPanneau();
+  if(e.target.dataset?.vue)setVue(e.target.dataset.vue);
+  if(e.target.dataset?.jours)setJours(+e.target.dataset.jours);
+  if(e.target.dataset?.lg)setLangue(e.target.dataset.lg===fLangue?null:e.target.dataset.lg);
+  if(e.target.classList?.contains("lien-evenement"))ouvrirEvenement(+e.target.dataset.evt);
+});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#panneau").hidden)fermerPanneau()});
+
+// ---------- récapitulatif quotidien ----------
+// Écrit par un modèle de langage à la collecte, lu tel quel ici : afficher la page
+// n'appelle aucun service extérieur. Absent par défaut — le bloc reste alors invisible.
+// « jour: null » veut dire qu'il n'y en a aucun en base, ce qui est le cas par défaut :
+// inutile de redemander à chaque rafraîchissement. La prochaine collecte remet le compteur
+// à zéro, puisqu'elle peut justement en avoir écrit.
+let recapAbsent=false;
+function dessinerRecap(d){
+  const bloc=$("#recap"), rs=(d&&d.recaps)||[];
+  if(d && d.jour===null)recapAbsent=true;
+  if(!rs.length){ bloc.hidden=true; bloc.innerHTML=""; return }
+  const ouvert=lireMemoire("map.recap", true);
+  const total=rs.reduce((n,r)=>n+r.nb_articles,0);
+  bloc.hidden=false; bloc.open=!!ouvert;
+  // le titre est un vrai h2 : sans lui, les h3 des thèmes sauteraient un niveau après le h1
+  bloc.innerHTML=`<summary><h2>Récapitulatif du jour<span class="quand">${esc(fmtJour(d.jour))}
+      · ${rs.length} thème${rs.length>1?"s":""} · ${total} article${total>1?"s":""}</span></h2></summary>`
+    + `<div class="recap-corps">`
+    + rs.map(r=>`<div><h3>${esc(r.nom)}</h3><p>${esc(r.texte)}</p></div>`).join("")
+    + `</div><p class="signature">Texte écrit par un modèle de langage (${esc(rs[0].modele)}) à partir
+       des seuls titres parus ce jour-là. Il peut se tromper : les articles d'origine font foi.</p>`;
+}
+const fmtJour=j=>{ const d=new Date(j+"T12:00:00Z");
+  return isNaN(d)?j:d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"}) };
+document.addEventListener("toggle",e=>{
+  if(e.target.id==="recap")ecrireMemoire("map.recap", e.target.open);
+}, true);
 
 // ---------- affichage ----------
-function dessinerCarte(syn){
-  const maxN=Math.max(1,...Object.values(syn.zones).map(z=>z.total));
-  ZONES.forEach(z=>{
-    const {total:n=0,nouveaux:nw=0}=syn.zones[z.code]||{};
-    const g=svg.querySelector(`[data-z="${z.code}"]`);
-    g.dataset.h=n===0?0:Math.max(1,Math.ceil(4*n/maxN));
-    g.classList.toggle("sel",fZone===z.code);
-    g.setAttribute("aria-pressed",fZone===z.code);
-    g.setAttribute("aria-label",`${z.nom} : ${n} information${n>1?"s":""}, dont ${nw} nouvelle${nw>1?"s":""}`);
-    const T=z.tag; T.n.textContent=n; T.t.textContent=z.court||z.nom; T.nw.textContent=nw?`● ${nw}`:"";
-    let x=8; T.n.setAttribute("x",x); x+=T.n.getComputedTextLength()+6;
-    T.t.setAttribute("x",x); const tl=T.t.getComputedTextLength(); if(tl)x+=tl+6;
-    T.nw.setAttribute("x",x); const nl=T.nw.getComputedTextLength(); if(nl)x+=nl+6;
-    T.rect.setAttribute("width",x+2);
-    const [ex,ey]=z.etiquette||[0,0];
-    T.g.setAttribute("transform",`translate(${ex-(x+2)/2},${ey})`);
-  });
-  svg.classList.toggle("hasSel",!!fZone);
-  document.querySelectorAll("#themes .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.t===fTheme));
-  document.querySelectorAll("#zonelist .chip").forEach(b=>b.setAttribute("aria-pressed",b.dataset.z===fZone));
+function dessinerEnTete(syn){
   $("#maj").textContent=syn.mise_a_jour?fmtH(syn.mise_a_jour):"aucune collecte";
   $("#srcs").textContent=syn.sources.join(", ")||"aucune";
 }
@@ -191,15 +378,22 @@ function dessinerCarte(syn){
 const ligne=i=>`<li>
     ${i.nouveau?'<span class="badge">Nouveau</span>':""}
     <h3>${esc(i.titre)}</h3>
-    <div class="meta"><span>${esc(i.source)}</span><span>${fmtH(i.date)}</span><span>${esc(zNom(i.zone))}</span><span>${esc(tNom(i.theme))}</span><a href="${esc(i.lien)}" target="_blank" rel="noopener">Lire l'article ↗</a></div>
+    <div class="meta"><span>${esc(i.source)}</span><span>${fmtH(i.date)}</span>${
+      i.lieu?`<span>${esc(i.lieu)}</span>`:""}<span>${esc(tNom(i.theme))}</span>${
+      i.nb_sources>1?`<button class="lien-evenement" data-evt="${i.evenement_id}">${i.nb_sources} sources</button>`:""
+      }<a href="${esc(i.lien)}" target="_blank" rel="noopener">Lire l'article ↗</a></div>
   </li>`;
 let affiches=0, totalFil=0;
 function bouton(){const reste=totalFil-affiches;return reste>0?`<li class="more"><button class="chip" id="plus">Afficher ${Math.min(PAS,reste)} de plus (${reste} restantes)</button></li>`:""}
 
 function dessinerFil(res){
   totalFil=res.total; affiches=res.articles.length;
-  $("#ftitle").textContent=(fZone?zNom(fZone):"Toutes les zones")+(fTheme?" · "+tNom(fTheme):"");
-  $("#fcount").textContent=`${res.total} information${res.total>1?"s":""} · ${res.nouveaux} nouvelle${res.nouveaux>1?"s":""}`;
+  $("#ftitle").textContent = pageTheme ? tNom(pageTheme)
+    : fThemes.length===1 ? tNom(fThemes[0])
+    : fThemes.length ? `${fThemes.length} thèmes` : "Toute l'actualité";
+  $("#fcount").textContent=`${res.total} événement${res.total>1?"s":""} · `
+    +`${res.nouveaux} nouveau${res.nouveaux>1?"x":""}`
+    +(res.total_articles>res.total?` · ${res.total_articles} articles`:"");
   $("#list").innerHTML=res.articles.length?res.articles.map(ligne).join("")+bouton()
     :`<li class="empty">Aucune information pour ce filtre. Utilisez « Tout afficher » pour revenir à la vue générale.</li>`;
 }
@@ -207,7 +401,8 @@ function dessinerFil(res){
 async function afficherPlus(){
   const b=$("#plus"); if(b){b.disabled=true;b.textContent="Chargement…"}
   try{
-    const res=await api("articles",{zone:fZone,theme:fTheme,limite:PAS,decalage:affiches});
+    const res=await api("articles",{themes:paramThemes(),langue:fLangue,jours:fJours,
+                                    limite:PAS,decalage:affiches});
     affiches+=res.articles.length;
     $(".more")?.remove();
     $("#list").insertAdjacentHTML("beforeend",res.articles.map(ligne).join("")+bouton());
@@ -223,18 +418,66 @@ async function actualiser(){
   const n=++requete;
   $("#list").setAttribute("aria-busy","true");
   try{
-    const [syn,res]=await Promise.all([api("synthese",{theme:fTheme}),api("articles",{zone:fZone,theme:fTheme,limite:PAS})]);
+    const [syn,res,rec]=await Promise.all([
+      api("synthese",{themes:paramThemes(),langue:fLangue,jours:fJours}),
+      api("articles",{themes:paramThemes(),langue:fLangue,jours:fJours,limite:PAS}),
+      // le récapitulatif ne doit pas faire échouer la page s'il manque
+      recapAbsent?null:api("recap",{themes:paramThemes()}).catch(()=>null)]);
     if(n!==requete)return;          // une requête plus récente a été lancée entre-temps
-    dessinerCarte(syn); dessinerFil(res);
+    dessinerEnTete(syn); dessinerFil(res);
+    if(rec!==null)dessinerRecap(rec);
   }catch(e){ if(n===requete)erreur(e) }
   finally{ $("#list").removeAttribute("aria-busy") }
 }
 
+// ---------- mises à jour sans recharger la page ----------
+// Un signal suffit : le serveur dit « une collecte vient de finir », le navigateur
+// redemande ce qu'il affiche, avec SES filtres. Si le flux d'événements ne passe pas
+// (proxy qui coupe, réseau capricieux), on retombe sur une interrogation légère.
+const PERIODE_REPLI = 120000;
+let replDirect = null;
+
+function suivreEnDirect(){
+  let flux;
+  try{ flux = new EventSource(`${API}/direct`); }catch{ return replierSurInterrogation() }
+  let vivant = false;
+  flux.addEventListener("bonjour", ()=>{ vivant = true; clearInterval(replDirect); replDirect = null });
+  flux.addEventListener("collecte", async e=>{
+    let d={}; try{ d = JSON.parse(e.data) }catch{}
+    recapAbsent=false;   // la collecte vient peut-être d'écrire le récapitulatif du jour
+    $("#maj").textContent = d.mise_a_jour ? fmtH(d.mise_a_jour) : $("#maj").textContent;
+    await actualiser();
+    if(carte)carte.rafraichir();
+  });
+  flux.onerror = ()=>{ if(!vivant) replierSurInterrogation() };
+  // si rien n'arrive dans les 15 premières secondes, le flux ne passe pas
+  setTimeout(()=>{ if(!vivant)replierSurInterrogation() }, 15000);
+}
+
+function replierSurInterrogation(){
+  if(replDirect)return;
+  replDirect = setInterval(()=>{ if(!document.hidden)actualiser() }, PERIODE_REPLI);
+}
+
 (async()=>{
   $("#list").innerHTML='<li class="empty">Chargement des actualités…</li>';
+  pageTheme = lirePageTheme();
+  fThemes = lireMemoire(CLE_THEMES, []);
+  fJours = lireMemoire("map.jours", 30);
+  // « undefined » = le visiteur n'a jamais touché aux puces de langue. Une valeur
+  // enregistrée, fût-elle null (« Toutes »), est un choix : elle l'emporte sur la
+  // configuration, qui ne décide que de la première visite.
+  fLangue = lireMemoire(CLE_LANGUE, undefined);
   try{ construire(await api("referentiel")); }catch(e){ erreur(e); return; }
+  fThemes = fThemes.filter(c=>THEMES.some(t=>t.code===c));   // un thème peut avoir disparu
+  marquerThemes();
+  if(fLangue===undefined)fLangue=LANGUE_DEFAUT;
+  if(!LANGUES.some(l=>l.code===fLangue))fLangue=null;   // langue retirée de la configuration
+  marquerLangue();
+  document.querySelectorAll("#vues .chip[data-jours]").forEach(b=>b.setAttribute("aria-pressed",+b.dataset.jours===fJours));
   await actualiser();
-  if(document.fonts)document.fonts.ready.then(actualiser);   // recalcule la largeur des étiquettes
+  setVue("points");
+  suivreEnDirect();
 })();
 </script>
 </body>

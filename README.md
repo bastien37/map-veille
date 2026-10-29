@@ -1,186 +1,675 @@
 # MAP – Monitoring de l'Actualité Planétaire
 
-Prototype de l'outil de veille du projet pluridisciplinaire (EAE). Une carte du monde en 6 zones et un fil d'actualité, alimentés automatiquement par des flux RSS de médias et par des API ouvertes.
+Outil de veille du projet pluridisciplinaire (EAE). Des flux RSS et des API ouvertes sont
+collectés, triés par thème, **placés sur une carte** et **regroupés par événement** : quand
+cinq médias parlent du même fait, la carte n'affiche qu'un point, et un panneau liste les
+cinq sources.
 
 ## Architecture
 
 ```
-                 ┌──────────── collecte (1 fois par jour) ────────────┐
-Flux RSS + API ──► collecteur/collect.py ──► donnees/map.sqlite
-(table sources)    tri zone + thème                 │
-                   (regles.json, pays.json)         │ lecture seule
-                                                    ▼
-                         navigateur ◄── JSON ── serveur/app.py (API FastAPI)
-                         site/index.html         /api/referentiel, /api/synthese,
-                         (aucune donnée)         /api/articles, /api/collectes
+config/themes.json ─┐
+config/flux.json ───┤
+config/ia.json ─────┤
+                    ▼
+Flux RSS + API ──► collecteur/collect.py ──────────► donnees/map.sqlite
+(table sources)    · téléchargement parallèle        articles, événements,
+                     (ETag, disjoncteur)             sources, collectes,
+                   · tri par mots-clés, puis         caches de géocodage
+                     modèle de langage si doute      et de classement
+                     (collecteur/ia.py)                      │
+                   · localisation (collecteur/lieux.py)      │
+                   · regroupement en événements               │
+                   · récapitulatif du jour par thème          │ lecture seule
+                                                              ▼
+                              navigateur ◄── JSON ── serveur/app.py (API FastAPI)
+                              site/index.html         /api/referentiel, /api/synthese,
+                              site/carte.js           /api/articles, /api/evenements,
+                              site/vendor/ (Leaflet)  /api/direct (temps réel)
 ```
 
-Le front ne contient **aucune donnée**, ni actualité, ni liste de zones ou de thèmes, ni tracé de la carte. Il demande tout à l'API, qui lit la base SQLite. Les filtres, les comptages et le repère « Nouveau » sont calculés côté serveur.
+Le front ne contient **aucune donnée** : ni actualité, ni liste de thèmes, ni réglage de
+carte. Il demande tout à l'API, qui lit la base SQLite. Les filtres, les comptages et le
+repère « Nouveau » sont calculés côté serveur.
 
-1. **Sources** : la table `sources` de la base liste les sources, chacune avec un type et un interrupteur « active ». Elle se gère depuis l'onglet **Sources** de l'administration.
-2. **Collecte** : le script interroge chaque source. Une source en panne ne bloque pas les autres, et son erreur est notée dans le journal de la base.
-3. **Tri** : chaque article reçoit une zone et un thème.
-   - Si l'API donne le pays (GDACS, ReliefWeb), la zone vient de `pays.json` et elle est exacte.
-   - Sinon, la zone et le thème viennent des mots-clés de `regles.json`. Un mot dans le titre vaut 3 points, dans le résumé 1 point.
-4. **Stockage** : la base `donnees/map.sqlite` ne garde que le titre, la source, la date, la zone, le thème et le lien (C03). Les doublons sont écartés, qu'ils aient le même lien ou le même titre (D03).
-   **À chaque collecte, les articles publiés il y a plus de 30 jours sont supprimés définitivement (D05)**, y compris ceux classés à la main ou masqués. Un article déjà vieux de plus de 30 jours n'est pas enregistré. Le nombre d'articles supprimés est noté dans le journal des collectes.
-5. **Diffusion** : l'API sert le fil des 30 derniers jours. Un article sans zone ou sans thème reste dans la base, mais elle ne le diffuse pas (D04).
+### La chaîne, étape par étape
+
+1. **Sources** — décrites dans `config/flux.json`, appliquées à la table `sources`.
+2. **Collecte** — les sources sont interrogées **en parallèle**, une seule à la fois par
+   domaine. Un flux inchangé répond `304` et n'est pas retéléchargé ; une source en panne
+   répétée est mise de côté quelque temps (disjoncteur) ; une source interrogée il y a moins
+   que sa fréquence est laissée tranquille.
+3. **Tri** — zone et thème par mots-clés, en un seul balayage du texte. Quand les
+   mots-clés hésitent, un modèle de langage peut trancher — désactivé par défaut (voir
+   « Comment un article reçoit son thème »).
+4. **Localisation** — balises géographiques du flux, sinon un nom de lieu reconnu dans le
+   titre, sinon rien (voir « Comment un article arrive sur la carte »).
+5. **Regroupement** — même lieu, même fenêtre de temps, titres proches : un seul événement.
+6. **Stockage** — `donnees/map.sqlite`. Seuls le titre, la source, la date, le lien et la
+   position sont conservés (C03). **Les articles de plus de 30 jours sont supprimés à chaque
+   collecte (D05)**, et les événements qui n'ont plus de source avec eux.
+7. **Récapitulatif** — si le modèle est actif, un paragraphe par thème pour la journée.
+8. **Diffusion** — l'API sert le fil et les points de la carte. Un article est diffusé s'il
+   a un thème, et une zone **ou** un thème imposé par sa source (D04, révisée ; voir
+   « Ce qui est diffusé, et ce qui ne l'est pas »).
+
+## Démarrer
+
+```bash
+uv sync                                   # installe Python 3.12 et les bibliothèques
+uv run collecteur/collect.py              # 1. remplit la base
+uv run uvicorn serveur.app:app --reload   # 2. démarre le serveur
+```
+
+Puis http://localhost:8000. Documentation interactive de l'API : http://localhost:8000/docs.
+
+La page ne fonctionne pas en double-cliquant sur `site/index.html` : sans serveur, elle n'a
+aucune donnée et le dit.
+
+Essais sans connexion :
+
+```bash
+uv run pytest                                                  # 317 tests, ~17 s
+uv run collecteur/collect.py --hors-ligne --base test.sqlite   # réponses enregistrées de tests/
+```
+
+Pour développer avec un serveur de flux local, lever la protection SSRF qui refuse les
+adresses internes :
+
+```bash
+MAP_AUTORISER_RESEAU_LOCAL=1 uv run collecteur/collect.py
+```
+
+## Configurer
+
+Tout ce qui se règle sans toucher au code est dans `config/`. Chaque fichier porte en tête
+un commentaire qui explique ses champs.
+
+`config/themes.json` et `config/site.json` sont **relus à chaud** : le serveur web tourne des
+semaines, et un thème ajouté doit apparaître sans redémarrage. Sans cela le symptôme est
+déroutant — la puce du thème manque dans la barre, et ses articles s'affichent avec leur code
+(`geo`) au lieu de leur nom. Les autres fichiers sont relus à chaque collecte.
+
+| Fichier | Ce qu'il décrit |
+|---|---|
+| `config/themes.json` | Les thèmes : code, nom, ordre d'affichage, interrupteur, mots-clés de tri |
+| `config/flux.json` | Les sources : nom, type, adresse, thème imposé, langue, fréquence de rafraîchissement |
+| `config/carte.json` | Le fond de carte : serveur de tuiles, attribution, vue initiale, nombre de points |
+| `config/site.json` | L'affichage : langue sur laquelle le site s'ouvre |
+| `config/geocodage.json` | Le service de géocodage extérieur — **désactivé par défaut** |
+| `config/ia.json` | Le modèle de langage qui classe les thèmes douteux — **désactivé par défaut** |
+| `config/exonymes.json` | Les noms français des lieux : ceux qu'on **reconnaît**, et ceux qu'on **affiche** |
+| `config/lieux_ignores.json` | Les noms de lieux à ne pas reconnaître, parce qu'ils sont aussi des mots courants |
+
+### Ajouter ou retirer un thème
+
+Ajouter une entrée dans `config/themes.json` suffit : la base se met à jour à la prochaine
+ouverture, l'API et le site suivent, sans toucher au code.
+
+```json
+{ "code": "spo", "nom": "Sport", "actif": true, "ordre": 60,
+  "mots_cles": ["jeux olympiques", "coupe du monde", "football", "championnat*"] }
+```
+
+Les mots-clés s'écrivent **en minuscules, sans accents**. Une étoile finale accepte n'importe
+quelle suite de lettres : `armee*` reconnaît *armées* et *armement*.
+
+Mettre `"actif": false` retire le thème du site **sans rien supprimer** : les articles déjà
+classés dedans restent en base, et réactiver le thème les fait réapparaître. Ne jamais
+réutiliser un code pour autre chose.
+
+### Ajouter une source
+
+Deux chemins, qui ne se marchent pas dessus :
+
+- **`config/flux.json`** est le catalogue : c'est là qu'on décrit les flux.
+- **L'administration** décide lesquels tournent.
+
+Concrètement : les champs du catalogue (type, adresse, thème imposé, langue, fréquence) sont
+repris du fichier à chaque collecte ; l'interrupteur « actif » n'est posé qu'à la création,
+donc couper une source depuis l'administration tient. Si on modifie l'adresse, la langue ou
+la fréquence **depuis l'administration**, la source passe « à la main » : le fichier cesse de
+s'y appliquer, et l'administration l'indique. Une source retirée du fichier est désactivée,
+jamais supprimée ; ses articles restent.
+
+```json
+{ "nom": "Le Monde", "type": "rss",
+  "url": "https://www.lemonde.fr/international/rss_full.xml",
+  "theme": null, "langue": "fr", "frequence_minutes": 60, "actif": true }
+```
+
+`theme` impose un thème à tous les articles de la source (`null` = tri par mots-clés).
+`frequence_minutes` est le délai minimal entre deux interrogations : on peut ainsi lancer la
+collecte toutes les dix minutes sans redemander un quotidien à chaque fois.
+
+Vérifier ce que la configuration a produit :
+
+```bash
+uv run collecteur/admin.py config
+```
+
+### Vérifier que les flux répondent — et trouver leur adresse
+
+Une adresse de flux se devine mal, et une source muette ne se remarque qu'au bout de
+quelques collectes. Après chaque ajout dans `config/flux.json` :
+
+```bash
+uv run collecteur/admin.py verifier-flux                       # les sources actives
+uv run collecteur/admin.py verifier-flux --decouvrir           # et cherche ce qui échoue
+uv run collecteur/admin.py verifier-flux --decouvrir --ecrire  # et corrige le fichier
+uv run collecteur/admin.py verifier-flux --toutes --nom ifri   # une seule, même désactivée
+```
+
+La commande interroge chaque source en parallèle **sans rien enregistrer** et affiche, pour
+chacune, `ok` avec le nombre d'articles et la date du plus récent, `vide` si elle répond sans
+rien d'exploitable, ou `NON` avec l'erreur.
+
+`--decouvrir` ne se contente pas de constater l'échec : il demande au site **où est son
+flux**. D'abord l'annonce officielle — la balise `<link rel="alternate"
+type="application/rss+xml">` que tout site bien élevé met dans son `<head>` —, sur la page
+d'accueil puis sur le dossier de l'adresse donnée, ce qui rattrape les sites multilingues.
+Si rien n'est annoncé, les chemins conventionnels sont essayés : `/feed/`, `/rss.xml`,
+`/index.xml`, `/atom.xml`, `?feed=rss2`… à la racine puis sous le préfixe de langue. La
+première adresse qui rend de vrais articles gagne.
+
+`--ecrire` reporte dans `config/flux.json` les adresses trouvées, et remplace
+l'avertissement « adresse non vérifiée » par la date de vérification et le nombre d'articles
+lus. Les adresses essayées passent par le même contrôle anti-SSRF que la collecte.
+
+### Les sources livrées
+
+**62 sources déclarées, 46 actives.** Toutes les adresses ont été interrogées pour
+de bon le 28 octobre 2026 : 44 répondaient, dont 8 à une autre adresse que celle écrite au
+départ, et 14 ne répondent pas du tout — celles-là sont coupées, avec le motif constaté
+écrit dans leur note. Chaque entrée de `config/flux.json` porte désormais soit
+« Adresse vérifiée le … », soit « NE RÉPOND PAS — … », et trois tests l'exigent.
+
+| Thème | Sources actives |
+|---|---|
+| *(aucun — tri par mots-clés)* | Le Monde, France 24, RFI, franceinfo, The Conversation France, Ars Technica |
+| `def` Conflits et défense | Opex360 (Zone militaire), Forces Operations Blog, Defense News, Breaking Defense, Defense One, Naval News, The War Zone |
+| `geo` Géopolitique | Le Grand Continent, The National Interest, Le Rubicon, Revue Conflits, Diploweb, Institut Montaigne, Areion24.news, War on the Rocks, Atlantic Council, Lowy Institute – The Interpreter, Le Monde diplomatique, Orient XXI, Politique étrangère (Ifri), Foreign Affairs, Foreign Policy, The Diplomat, RUSI, CSIS, SWP Berlin, Responsible Statecraft |
+| `cyb` Cybersécurité et informatique | CERT-FR (ANSSI), LeMagIT, Le Monde Informatique, Next, ZATAZ, Krebs on Security, BleepingComputer, The Record, The Hacker News, Dark Reading, CISA – avis de sécurité, Schneier on Security |
+| `cli` Climat et catastrophes | GDACS (ONU / Commission européenne) |
+
+**Les quatorze sources coupées, et pourquoi** (à réactiver depuis l'administration si elles
+reviennent) :
+
+| Motif | Sources |
+|---|---|
+| Filtrage anti-robot : 403 ou connexion coupée sur tout le site | IFRI, Chatham House, ECFR, Géoconfluences, ANSSI (`cyber.gouv.fr`) |
+| Plus aucun flux : 404 partout, rien d'annoncé par le site | IRSEM, Revue Défense Nationale, Ministère des Armées, OTAN |
+| Répond 200 mais sert du HTML | Carnegie Endowment, Fondation Robert Schuman, Mer et Marine |
+| Flux retiré volontairement (410 Gone) | Meta-Defense |
+| Flux cassé côté site : que des avertissements PHP, aucun XML | East Pendulum |
+
+Le CERT-FR, lui, répond très bien (40 avis) : c'est le portail `cyber.gouv.fr` de l'ANSSI
+qui est derrière une protection anti-robot, pas le CERT.
+
+Les fréquences suivent le rythme réel de publication : 60 min pour un quotidien, 120 à 180
+pour la presse spécialisée, 360 pour les instituts, 1 440 pour une revue universitaire.
+Interroger un trimestriel toutes les heures n'a aucun sens et use le crédit de bonne volonté
+du site.
+
+**Le thème `geo`** vise le *registre d'analyse* (« rivalité systémique », « multipolaire »,
+« autonomie stratégique », « puissance »), pas les faits : une frappe de missile reste dans
+`def`, une visite d'ambassadeur dans `dip`. Un test le vérifie
+(`tests/test_config.py::test_les_mots_cles_geo_ne_devorent_pas_les_autres_themes`).
+
+**Le thème `cyb`** couvre la cybersécurité *et* l'informatique au sens large. En le créant,
+`cyber*`, `internet`, `numerique`, `puce*` et `semi conducteur*` ont **quitté `tec`** : les
+laisser aux deux endroits aurait donné un point à chacun sur tout article de cybersécurité,
+donc une égalité permanente. `tec` garde l'espace, les sciences et l'intelligence
+artificielle, et a reçu en échange `recherche`, `laboratoire`, `biotech*`, `telescope`,
+`orbite`, `astronom*`, `physique`, `genome`, `vaccin*`. Un test interdit désormais qu'un
+mot-clé appartienne à deux thèmes, ou qu'une racine en couvre un autre du même thème
+(`cyber*` rendait `cyberattaque*` inutile, et doublait son score).
+
+À refaire de temps en temps, un flux ne prévenant pas quand il déménage :
+
+```bash
+uv run collecteur/admin.py verifier-flux --decouvrir --ecrire
+```
+
+Les huit adresses corrigées l'ont été par cette commande ou par le même procédé à la main :
+`nationalinterest.org/feed/`, `navalnews.com/feed/?feed=rss2`,
+`rusi.org/rss/latest-commentary.xml` (annoncée par le site), `csis.org/rss.xml`,
+`swp-berlin.org/rss.xml`, `feeds.arstechnica.com/arstechnica/index.xml`,
+`lemagit.fr/rss/ContentSyndication.xml` et `orientxxi.info/spip.php?page=backend&lang=fr`.
+
+Ars Technica n'a pas de flux pour sa seule rubrique sécurité : c'est le flux général du
+site qui est repris, et son thème est donc laissé au tri par mots-clés plutôt qu'imposé
+à `cyb` — sinon l'astronomie finirait en cybersécurité.
+
+**Un nouveau type d'API** demande du code : écrire `source_xxx(s, hors_ligne, …)` dans
+`collect.py`, l'appeler depuis `collecter_source()`, et ajouter le type dans `TYPES_SOURCES`
+et dans la contrainte `CHECK` de la table `sources` (`base.py`). Le tri, la localisation, le
+regroupement et le stockage sont communs.
+
+## Comment un article reçoit son thème
+
+**Les mots-clés d'abord, toujours.** Un thème imposé par la source l'emporte sur tout ; sinon
+les mots-clés de `config/themes.json` sont comptés (titre ×3, résumé ×1) et le thème qui a le
+plus de points gagne. C'est gratuit, instantané, et chaque décision s'explique en montrant le
+mot qui l'a provoquée.
+
+Ils échouent sur deux familles de titres :
+
+```
+« Pékin et Washington reprennent langue »            aucun mot-clé ne tombe
+« Nouvelle frégate pour la marine indonésienne »     « def » et « eco » à égalité
+```
+
+**Un modèle de langage peut prendre le relais, là et seulement là.** Il est **désactivé par
+défaut** : sans `config/ia.json` actif, rien ne part sur le réseau et le collecteur se
+comporte exactement comme avant.
+
+```bash
+export MAP_IA_CLE="..."              # jamais dans le fichier : il est suivi par Git
+# puis « actif: true » dans config/ia.json
+uv run collecteur/collect.py
+uv run collecteur/admin.py ia        # ce que le modèle a classé, et son état
+uv run collecteur/collect.py --sans-ia   # une collecte sans l'appeler
+```
+
+Huit services sont préréglés dans `config/ia.json`. Tous parlent le même dialecte
+« chat completions » et s'authentifient de la même façon : **changer d'hébergeur ne demande
+que trois lignes** — `url`, `modele`, `cle_env`.
+
+| | Service | Coût |
+|---|---|---|
+| **Groq** | `api.groq.com` | gratuit, généreux, très rapide |
+| **Cerebras** | `api.cerebras.ai` | gratuit, très rapide |
+| **Mistral** | `api.mistral.ai` | gratuit (offre « Experiment », débit limité), français |
+| **Google Gemini** | `generativelanguage.googleapis.com` | gratuit, plafonné |
+| **OpenRouter** | `openrouter.ai` | gratuit pour les modèles suffixés `:free` |
+| **DeepSeek** | `api.deepseek.com` | **payant**, mais parmi les moins chers |
+| **Together** | `api.together.xyz` | **payant** pour l'essentiel du catalogue |
+| **Ollama** | `127.0.0.1:11434` | gratuit pour de bon, **rien ne sort du serveur** |
+
+Les huit adresses ont été vérifiées : elles répondent `401` sans clé, ce qui prouve qu'elles
+existent et attendent bien une authentification. Les quotas et les noms de modèles, eux,
+changent souvent — les vérifier chez le fournisseur avant de s'y fier.
+
+**DeepSeek n'est pas gratuit**, contrairement à une idée répandue : il se facture au jeton,
+très bas. À l'échelle de ce projet la dépense est dérisoire — sept appels par jour pour le
+récapitulatif, et le classement n'appelle que sur les titres que les mots-clés n'ont pas
+tranchés, une fois chacun grâce au cache. Quelques centimes par mois. Mais ce n'est pas zéro,
+et il faut une carte.
+
+**Essayer avant de se lancer :**
+
+```bash
+export MAP_IA_CLE="..."
+uv run collecteur/admin.py ia --tester
+```
+
+Deux appels réels — un classement, un résumé — sans rien enregistrer. La commande affiche ce
+que le modèle répond et en combien de temps, ou l'erreur exacte. C'est la façon de vérifier
+une clé sans lancer une collecte entière.
+
+`quand` règle le déclenchement : `doute` (défaut : aucun thème trouvé **ou** deux thèmes à
+égalité), `manquant` (seulement quand rien n'a été trouvé), `tout` (chaque article, coûteux).
+
+Cinq garde-fous, tous nécessaires :
+
+| | |
+|---|---|
+| **Cache obligatoire** | Un titre soumis une fois ne l'est jamais deux, même après redémarrage (table `themes_ia`). Changer de modèle ou de liste de thèmes invalide les entrées : la question n'est plus la même. Les réponses négatives sont mémorisées aussi. |
+| **Budget par collecte** | `max_par_collecte` appels au plus, et une limite de débit. Une offre gratuite se consomme vite. |
+| **Jamais bloquant** | Panne, délai dépassé, quota épuisé, réponse incompréhensible : on garde ce que les mots-clés ont trouvé. Après trois échecs d'affilée le modèle n'est plus appelé de la collecte, comme le disjoncteur des sources. Une panne n'est **pas** mise en cache. |
+| **Ce qui part** | Le titre et les 400 premiers caractères du résumé. Jamais l'article entier (C03). |
+| **Ce qui revient** | Un code de thème de la liste active, ou rien. Toute autre réponse est jetée — y compris une réponse approchante : « defense » n'est pas `def`. |
+
+Le dernier point est une mesure de sécurité, pas une coquetterie : le titre soumis vient d'un
+flux, donc d'un tiers, et peut contenir une phrase qui ressemble à une consigne. Comme la
+seule sortie acceptée est un code de la liste, le pire qu'un flux hostile puisse obtenir est
+un mauvais classement d'un de ses propres articles — ce qu'il pouvait déjà faire en
+choisissant ses mots.
+
+Un article classé par le modèle est marqué (`articles.theme_ia`) : `admin.py ia` les liste, et
+`admin.py classer` corrige à la main ce qui est faux. **Un article classé à la main n'est plus
+jamais modifié**, ni par les mots-clés ni par le modèle.
+
+## Ce qui est diffusé, et ce qui ne l'est pas
+
+Un article est diffusé s'il a **un thème**, et **une zone ou un thème imposé par sa source**.
+C'est la vue `fil` ; `a_trier` en est exactement le complément, pour qu'aucun article ne
+tombe entre les deux. Les deux vues sont écrites à partir d'une seule condition, dans
+`collecteur/base.py` — les laisser diverger produirait des articles invisibles partout.
+
+| | Diffusé ? |
+|---|---|
+| Zone et thème | oui |
+| Thème imposé par la source, pas de zone | **oui** (depuis la v15) |
+| Thème trouvé par mots-clés, pas de zone, flux généraliste | non — à trier |
+| Zone mais pas de thème | non — à trier |
+| Masqué depuis l'administration | non, et absent des deux vues |
+
+**Pourquoi ce changement.** La règle d'origine (D04) exigeait zone *et* thème. Elle datait
+de la carte des six zones, où un article sans zone n'avait littéralement nulle part où
+s'afficher. Depuis la carte à points, la zone n'apparaît plus sur le site, et la carte ne
+montre que les articles localisés : l'exigence ne protégeait plus rien de visible, mais elle
+écartait un tiers des articles réels — surtout des avis du CERT-FR et des notes d'instituts,
+qui ne nomment aucun lieu et n'en nommeront jamais. Un flux à thème imposé dit lui-même de
+quoi il parle : exiger en plus une zone revenait à jeter ce qu'on savait déjà. Les flux
+généralistes gardent la règle entière.
+
+Mesuré sur les dépêches du jour : **63 % → 95 % d'articles diffusés**, 430 de plus, et pas un
+point de changement sur la carte. Les articles déjà en base sont rattrapés par la migration,
+car un article déjà connu n'est jamais réécrit — sans cela, un tiers du fonds serait resté
+invisible pour toujours.
+
+La zone reste utilisée : elle classe, elle filtre l'API (`?zone=`), et `admin.py stats` la
+montre — avec une ligne « sans zone » depuis que ces articles existent.
+
+## Le récapitulatif du jour
+
+Un paragraphe par thème, écrit par le modèle de langage à partir des **seuls titres parus
+ce jour-là**, affiché en haut de la page dans un bloc pliable.
+
+```bash
+uv run collecteur/admin.py recap                      # le jour même
+uv run collecteur/admin.py recap --jour 2026-10-27
+uv run collecteur/admin.py recap --theme cyb --refaire
+```
+
+Il est écrit **à la collecte** et rangé en base. Il faut pour cela **deux interrupteurs**
+dans `config/ia.json` — `"actif": true` et `"recap": {"actif": true}` — et une clé dans
+`MAP_IA_CLE`, ou Ollama sur la machine, qui n'en demande aucune. Tant que ce n'est pas fait,
+le bloc n'apparaît pas du tout sur le site : il reste caché plutôt que d'afficher une boîte
+vide. **Le tableau de bord de `/admin` dit où en est le modèle** — inactif, actif mais sans
+résumé écrit, ou en erreur — parce que l'absence de bloc, elle, ne dit rien. Afficher la page ne déclenche jamais d'appel à un service extérieur : ce
+serait un appel par visiteur, et le texte serait différent à chaque rechargement. Sans
+modèle configuré, `admin.py recap` reste utile — il affiche ce qui est déjà en base.
+
+Le coût est négligeable : un appel par thème et par jour, sept au total. Un récapitulatif
+déjà écrit n'est refait que si la journée a **gagné des articles** *et* que le précédent a
+dépassé `recap.intervalle_minutes` (trois heures par défaut). Sans nouvel article le texte
+serait identique : on ne dépense rien. Les récapitulatifs sont gardés 90 jours, bien après
+les articles qu'ils résument — cela donne une mémoire du trimestre pour presque rien.
+
+La consigne donnée au modèle lui interdit d'ajouter le moindre fait, chiffre, date ou nom
+qui ne soit pas dans les titres, et lui dit explicitement que ces titres sont des données,
+jamais des instructions. Le bloc affiché porte la mention de ce qu'il est : *« Texte écrit
+par un modèle de langage à partir des seuls titres parus ce jour-là. Il peut se tromper :
+les articles d'origine font foi. »* Un résumé reste un résumé ; c'est pour cela que les
+articles sont juste en dessous.
+
+## Comment un article arrive sur la carte
+
+Trois chances, de la plus sûre à la plus faillible. La règle est la même partout :
+**mieux vaut un article sans point qu'un point faux.** Un article mal placé raconte une
+histoire fausse ; un article absent de la carte reste lisible dans la liste.
+
+1. **Les balises du flux** — `georss:point`, `geo:lat` / `geo:long`, `georss:where`, et la
+   géométrie des alertes GDACS. Exactes, fournies par le média.
+2. **Un nom de lieu reconnu dans le titre ou le résumé**, cherché dans
+   `donnees/gazetteer.json.gz` : 12 629 pays et villes, 322 Kio, hors ligne, sans limite de
+   débit. Un nom n'est retenu que s'il porte une majuscule dans le texte d'origine, fait au
+   moins quatre lettres et n'est pas dans `config/lieux_ignores.json`. Le nom le plus long
+   consomme ses mots (« New Delhi » ne fait pas gagner « Delhi ») et les homonymes se
+   départagent par la population, puis par le pays cité dans le même texte.
+3. **Un service de géocodage extérieur**, désactivé par défaut, et seulement pour un nom
+   qu'une *source* annonce comme étant un lieu — jamais pour deviner un lieu dans une phrase.
+
+Mesuré sur `tests/lieux_annotes.json` (52 cas annotés à la main, dont 14 qui ne doivent
+**pas** être placés) : 100 % de precision, 100 % de rappel. Sur 4 000 articles du banc de
+flux, 81 % sont placés.
+
+La **zone** se déduit du pays du lieu quand les mots-clés n'en donnent pas : sans cela, un
+quart des points seraient perdus faute de zone.
+
+**Les lieux s'affichent en français.** Le gazetteer vient de GeoNames et nomme tout en
+anglais ; « Spain » ou « Beijing » sous un article du *Monde* détonnent. Deux sources, selon
+le type de lieu : `collecteur/pays.json` pour les pays (211 noms, sans ambiguïté), et la
+section `affichage` de `config/exonymes.json` pour les villes — une liste courte et relue à
+la main. Elle est **distincte** de la liste d'alias du même fichier, qui sert à *reconnaître*
+et accepte pour cela « Kharkov », « Madras » ou « Bombay » : excellentes pour retrouver un
+lieu dans un titre, mauvaises pour le nommer. Retirer une ligne de `affichage` rend son nom
+GeoNames à la ville.
+
+**Les faux lieux.** `config/lieux_ignores.json` liste les noms que l'extraction ne doit pas
+reconnaître. Une première collecte réelle en a révélé une vingtaine : « Lockheed Martin »
+plaçait des articles à Martin (Slovaquie), « Enterprise AI » à Enterprise (Alabama),
+« Palo Alto Networks » en Californie, Marco Rubio au Venezuela, et le mot « cela » en
+Espagne. La règle reste la même : **mieux vaut un lieu manquant qu'un point faux.**
+
+### Refaire la base de lieux
+
+`donnees/gazetteer.json.gz` est versionné : l'installation et la collecte n'ont besoin ni de
+réseau, ni de bibliothèque supplémentaire. Pour le reconstruire après avoir enrichi
+`config/exonymes.json` :
+
+```bash
+uv run --with geonamescache outils/construire_gazetteer.py
+```
+
+Les « alternatenames » de GeoNames ne sont **pas** reprises : toutes langues mélangées et sans
+étiquette, elles donnent *Landan* ou *Ljondan* pour London. Les noms français sont relus à la
+main dans `config/exonymes.json`.
+
+### Activer un géocodeur extérieur
+
+Dans `config/geocodage.json`, mettre `"actif": true` et renseigner un `user_agent` avec une
+**vraie adresse de contact** — Nominatim et Photon l'exigent, et une adresse bidon fait
+bloquer le projet entier. Le programme refuse de démarrer avec l'adresse d'exemple.
+
+Tout nom cherché est mémorisé dans la table `lieux_geocodes`, succès **comme échec** : un même
+nom n'est jamais demandé deux fois. Sur un serveur dédié, auto-héberger Photon lève la limite
+de débit.
+
+## Comment deux articles n'en font qu'un
+
+Trois conditions, **toutes nécessaires** : moins de 50 km, moins de 48 h d'écart, et des
+titres qui se ressemblent assez. Le seuil de ressemblance dépend de ce que le lieu dit déjà :
+28 % de mots communs si les deux articles sont au même endroit, 45 % sinon.
+
+Les seuils sont réglés et surveillés sur `tests/regroupement_annote.json`, des paires de
+manchettes annotées à la main. Ils penchent volontairement du côté de la séparation :
+réunir deux faits distincts est pire que les laisser côte à côte, car le lecteur ne voit
+alors plus qu'un point là où il se passe deux choses.
+
+**Deux langues ne se rejoignent que par les mots qu'elles partagent.** « Inondations
+meurtrières à Lagos » et « Deadly floods in Lagos » restent deux points au même endroit : la
+ressemblance se mesure sur des mots, et la traduction n'en laisse aucun. Quand les titres
+partagent un nom propre ou une date — « Sommet d'Oslo 2026 » et « Oslo 2026 summit » — le
+regroupement a lieu, et l'événement porte alors ses deux langues. Les réunir dans tous les
+cas demanderait de la traduction ou des plongements multilingues, hors du périmètre de ce
+projet ; le filtre par langue est la façon de n'en voir qu'un.
+
+> **Changement par rapport à la version précédente.** Un deuxième article portant le même
+> titre était auparavant *jeté* — sa source était perdue. Il est désormais conservé et
+> rattaché au même événement. Le fil rend une ligne par événement, avec `nb_sources` ;
+> `grouper=false` retrouve la liste article par article.
 
 ## La base de données
 
-`donnees/map.sqlite` est créée automatiquement au premier lancement. Le schéma est décrit dans `collecteur/base.py`.
+`donnees/map.sqlite` est créée au premier lancement et migrée automatiquement. Le schéma est
+dans `collecteur/base.py` (version 15).
 
 | Table ou vue | Contenu |
 |---|---|
-| `articles` | Tous les articles collectés : lien (unique), titre, source, date de publication, zone, thème, date d'ajout, correction manuelle, masquage |
-| `zones`, `themes` | Les 6 zones et les 5 thèmes. Les clés étrangères empêchent un code inconnu. |
-| `collectes` | Journal des passages du collecteur : date, éléments lus, nouveaux articles, doublons, articles supprimés |
-| `sources` | Les sources à interroger : nom, type (RSS, GDACS, ReliefWeb), adresse, active ou non, paramètres, notes. Remplie au départ avec les 7 sources d'origine. |
-| `collectes_sources` | Pour chaque passage, le résultat de chaque source (ok ou erreur, avec le message) |
-| `fil` (vue) | Les articles publiables, c'est-à-dire avec une zone et un thème, et non masqués |
+| `articles` | Titre, source, date, lien, zone, thème (et s'il vient du modèle), **langue**, **position**, événement, correction manuelle, masquage |
+| `evenements` | Un fait = une ligne : titre, lieu, position, période, nombre de sources publiables, langues présentes |
+| `themes`, `zones` | Référentiels. `themes` vient de `config/themes.json` |
+| `sources` | Les sources : état du cache conditionnel, disjoncteur, langue, fréquence, origine |
+| `lieux_geocodes` | Cache de géocodage, succès et échecs |
+| `themes_ia` | Cache du classement par modèle de langage : un titre n'est soumis qu'une fois |
+| `recaps` | Un récapitulatif par thème et par journée, gardé 90 jours |
+| `collectes`, `collectes_sources` | Journal de chaque passage, source par source |
+| `fil` (vue) | Les articles publiables : un thème, et une zone ou un thème imposé |
 | `a_trier` (vue) | Les articles que le tri n'a pas su classer |
 
-On peut ouvrir la base avec [DB Browser for SQLite](https://sqlitebrowser.org/) ou n'importe quel outil SQL, par exemple pour compter les articles par zone et par semaine.
-
-Outil d'administration en ligne de commande :
+Outil en ligne de commande :
 
 ```bash
-uv run collecteur/admin.py stats                # chiffres par zone et thème, dernières collectes et sources en erreur
-uv run collecteur/admin.py a-trier              # articles non classés, avec leur numéro
-uv run collecteur/admin.py classer 42 asi def   # classe l'article 42 en Asie / Conflits et défense
-uv run collecteur/admin.py chercher "Taïwan"    # recherche dans les titres
+uv run collecteur/admin.py stats      # chiffres par zone et thème, dernières collectes
+uv run collecteur/admin.py config     # thèmes et sources tels que la configuration les a posés
+uv run collecteur/admin.py verifier-flux   # quelles sources répondent vraiment
+uv run collecteur/admin.py ia         # état du classement par modèle de langage
+uv run collecteur/admin.py recap      # récapitulatif du jour, thème par thème
+uv run collecteur/admin.py a-trier    # articles non classés, avec leur numéro
+uv run collecteur/admin.py classer 42 asi def
+uv run collecteur/admin.py chercher "Taïwan"
 ```
 
-Un article classé à la main n'est plus jamais modifié par le collecteur, et il apparaît tout de suite sur le site.
+Un article classé à la main n'est plus jamais modifié par le collecteur.
 
-
-## Les sources branchées
-
-| Type | Source | Clé | Ce qu'elle apporte |
-|---|---|---|---|
-| `rss` | Le Monde, France 24, RFI, franceinfo | aucune | Actualité internationale des grands médias français |
-| `gdacs` | [GDACS](https://www.gdacs.org/) (ONU / Commission européenne) | aucune | Alertes orange et rouges : séismes, cyclones, inondations, volcans, sécheresses, feux, tsunamis. Pays fourni par l'API. |
-| `reliefweb` | [ReliefWeb](https://apidoc.reliefweb.int/) (OCHA, ONU) | **appname** | Rapports humanitaires en français, pays fourni par l'API. Désactivé tant que l'appname n'est pas obtenu. |
-
-**ReliefWeb** demande un `appname` approuvé pour chaque requête. Pour l'activer :
-1. Demander un appname via le formulaire indiqué sur https://apidoc.reliefweb.int/parameters (par exemple `eae-map-veille`, avec une adresse de contact).
-2. Définir la variable d'environnement `RELIEFWEB_APPNAME` sur la machine qui lance la collecte : `$env:RELIEFWEB_APPNAME="..."` (PowerShell) ou `export RELIEFWEB_APPNAME=...`.
-3. Dans l'administration, onglet **Sources**, activer la source ReliefWeb.
-
-**GDACS** demande de citer la source sous la forme « Global Disaster Alert and Coordination System, GDACS ». C'est fait automatiquement, car c'est le nom de la source affiché sous chaque alerte.
-
-## Interface d'administration
-
-Une console web, réservée à l'équipe, est disponible sur **http://localhost:8000/admin**. Elle a cinq onglets :
-
-- **Tableau de bord** : chiffres clés, articles visibles par zone et par thème, activité de chaque source.
-- **À trier** : les articles que le tri automatique n'a pas su classer. On choisit leur zone et leur thème puis on clique sur « Classer » : l'article apparaît aussitôt sur le site. « Masquer » écarte un article hors sujet (actualité française, culture…).
-- **Articles** : recherche dans les titres, filtres par statut, zone et thème. On peut reclasser n'importe quel article, le masquer ou le réafficher. Un article masqué reste dans la base mais disparaît du site.
-- **Sources** : la liste des sources, avec pour chacune son dernier passage (ok ou erreur) et son nombre d'articles. On peut en ajouter, les modifier, les activer ou les désactiver d'un clic, et les supprimer (leurs articles déjà collectés restent). Le bouton « Tester sans enregistrer » interroge une source et montre un aperçu des articles et de leur classement, sans rien écrire dans la base : pratique pour vérifier l'adresse d'un nouveau flux RSS.
-- **Collectes** : bouton « Lancer la collecte » et journal des passages, avec l'état et le message d'erreur de chaque source.
-
-L'accès est protégé par un mot de passe. L'identifiant est `admin`, et le mot de passe est celui de la variable d'environnement `MAP_ADMIN_MOT_DE_PASSE`. Sans cette variable, l'administration est désactivée.
-
-```powershell
-# PowerShell, dans le dossier map-veille
-$env:MAP_ADMIN_MOT_DE_PASSE = "un-mot-de-passe-long"
-uv run uvicorn serveur.app:app --reload
-```
-```bash
-# Linux ou Git Bash
-MAP_ADMIN_MOT_DE_PASSE="un-mot-de-passe-long" uv run uvicorn serveur.app:app --reload
-```
-
-Le mot de passe n'est jamais écrit dans le code ni dans Git. En production, le site doit être servi en **HTTPS**, sinon le mot de passe circule en clair sur le réseau.
-
-Les mêmes actions existent en ligne de commande avec `collecteur/admin.py` (voir plus haut).
-
-## Installation avec uv
-
-Les bibliothèques du projet sont gérées par [uv](https://docs.astral.sh/uv/). `pyproject.toml` les déclare et `uv.lock` fige leurs versions exactes, pour que tout le monde ait le même environnement.
-
-1. Installer uv (une seule fois par poste), sous Windows (PowerShell) :
-   ```powershell
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-   ```
-   Sous Linux ou macOS : `curl -LsSf https://astral.sh/uv/install.sh | sh`
-2. Dans le dossier `map-veille`, installer Python et les bibliothèques :
-   ```bash
-   uv sync
-   ```
-   uv télécharge Python 3.12 (version fixée par `.python-version`) s'il n'est pas déjà présent, puis crée l'environnement `.venv/`.
-
-Bibliothèques utilisées :
-
-| Bibliothèque | Rôle |
-|---|---|
-| `feedparser` | Lecture des flux RSS et Atom, y compris quand ils sont mal formés |
-| `fastapi` | API web qui sert les données au front |
-| `uvicorn` | Serveur web qui fait tourner l'API |
-| `pytest`, `httpx2` (développement) | Tests automatiques du collecteur et de l'API |
-
-Pour ajouter une bibliothèque : `uv add nom` (ou `uv add --dev nom` pour un outil de développement). Il faut ensuite valider `pyproject.toml` et `uv.lock` dans Git.
-
-## Lancer en local
-
-Deux commandes, dans deux terminaux ouverts dans le dossier `map-veille` :
-
-```bash
-uv run collecteur/collect.py                     # 1. remplit la base (à relancer pour mettre à jour)
-uv run uvicorn serveur.app:app --reload          # 2. démarre le serveur
-```
-
-Ouvrir ensuite http://localhost:8000. La documentation interactive de l'API est sur http://localhost:8000/docs : on peut y essayer chaque requête.
-
-La page ne fonctionne plus en double-cliquant sur `site/index.html` : sans serveur, elle n'a aucune donnée à afficher et elle l'indique.
-
-Tests, sans connexion :
-
-```bash
-uv run pytest
-uv run collecteur/collect.py --hors-ligne --base test.sqlite   # essai sur les réponses enregistrées de tests/
-```
-
-### Les routes de l'API
+## Les routes de l'API
 
 | Route | Paramètres | Réponse |
 |---|---|---|
-| `GET /api/referentiel` | – | Zones (nom, libellé court, tracé SVG, position de l'étiquette), thèmes, durée du repère « Nouveau » |
-| `GET /api/synthese` | `theme`, `jours` (30) | Nombre d'articles et de nouveautés par zone, date de la dernière collecte, liste des sources |
-| `GET /api/articles` | `zone`, `theme`, `jours` (30), `limite` (150), `decalage` (0) | Articles du plus récent au plus ancien, avec le total pour la pagination |
-| `GET /api/collectes` | `limite` (5) | Journal des collectes et état de chaque source |
+| `GET /api/referentiel` | – | Zones, thèmes actifs, langues, langue d'ouverture, réglages de la carte |
+| `GET /api/synthese` | `theme`, `themes`, `langue`, `jours`, `zones` | Total, date de la dernière collecte, sources ; comptages par zone si `zones=1` |
+| `GET /api/articles` | `zone`, `theme`, `themes`, `langue`, `jours`, `limite`, `decalage`, `grouper` | Le fil, une ligne par événement par défaut |
+| `GET /api/evenements` | `theme`, `themes`, `zone`, `langue`, `jours`, `bbox`, `limite` | Les points de la carte, les plus suivis d'abord |
+| `GET /api/evenements/{id}` | – | Un événement et **toutes ses sources** |
+| `GET /api/recap` | `jour`, `theme`, `themes` | Le récapitulatif quotidien déjà écrit (cette route ne calcule rien) |
+| `GET /api/direct` | – | Flux Server-Sent Events : signale qu'une collecte a eu lieu |
+| `GET /api/collectes` | `limite` | Journal des collectes et état de chaque source |
 
-Un code de zone ou de thème inconnu renvoie une erreur 422. Si la base n'existe pas encore, l'API répond 503.
+`themes` accepte une liste séparée par des virgules. `bbox` s'écrit `ouest,sud,est,nord` en
+degrés et accepte le passage de l'antiméridien. `langue` vaut `fr`, `en`, ou rien (ou
+`toutes`) pour ne pas filtrer. Un code inconnu renvoie 422 ; si la base n'existe pas
+encore, 503.
+
+Sur la carte, `langue` garde les événements dont **au moins une** source est dans cette
+langue ; sur le fil, l'article mis en avant est alors choisi dans cette langue, pour ne pas
+afficher un titre anglais à qui a demandé du français.
+
+Les réponses sont compressées (gzip) et portent `Cache-Control` et `ETag` : le référentiel est
+gardé une heure, le fil une minute, et un navigateur à jour reçoit `304`.
+
+## Le site
+
+**La langue d'ouverture** se règle dans `config/site.json` : le site livré s'ouvre sur le
+français, les sources anglaises continuant d'être collectées et une puce suffisant à les
+afficher. `null` rend toutes les langues d'emblée. Le choix du visiteur l'emporte toujours :
+dès qu'il touche une puce, sa préférence est retenue dans son navigateur — y compris
+« Toutes », qui est un choix comme un autre — et le réglage ne s'applique plus à lui.
+
+En haut, le **récapitulatif du jour** quand il existe : un bloc pliable (`<details>`, donc
+pliable au clavier sans une ligne de JavaScript), une colonne par thème sur grand écran, le
+choix plié/déplié retenu localement. Absent par défaut, et la page cesse alors de le
+demander à chaque rafraîchissement.
+
+Deux vues — **Carte** et **Liste seule** — un filtre de période, un filtre de langue
+(Toutes / Français / Anglais) et des thèmes que le visiteur coche à sa guise (ses choix sont
+retenus localement). Chaque thème a sa page : `/theme/eco`,
+adresse partageable, sans rechargement.
+
+Leaflet et Leaflet.markercluster sont **servis par le site** (`site/vendor/`, licences
+comprises) : aucune requête vers un CDN. Le module de carte et ces bibliothèques ne sont
+téléchargés qu'à la première ouverture de la carte — un visiteur qui reste sur la liste ne
+paie pas ces 60 Kio. Les points ne sont demandés que pour la fenêtre affichée.
+
+Le fond de carte vient par défaut d'OpenStreetMap, dont la politique d'usage demande de citer
+la source — c'est fait en permanence sur la carte — et de rester sur un trafic modeste. Pour
+un site qui marche, installer son propre serveur de tuiles et changer l'adresse dans
+`config/carte.json`.
+
+**Accessibilité** : contrastes conformes WCAG AA en thème clair comme sombre (le plus faible
+mesuré est 4,69 : 1), navigation complète au clavier avec focus visible, zones `aria-live`
+pour l'état de la carte, cibles tactiles d'au moins 24 px, et la vue « Liste seule » donne
+exactement les mêmes données sans carte. Vérifié par `bancs/bench_accessibilite.mjs`.
+
+**Mises à jour sans recharger** : le serveur signale la fin d'une collecte, le navigateur
+redemande ce qu'il affiche avec ses propres filtres. Si le flux d'événements ne passe pas
+(proxy qui coupe), le site se replie tout seul sur une interrogation toutes les deux minutes,
+suspendue quand l'onglet est caché.
+
+## Administration
+
+Console web réservée à l'équipe sur **/admin**, protégée par mot de passe.
+
+```bash
+MAP_ADMIN_MOT_DE_PASSE="un-mot-de-passe-long" uv run uvicorn serveur.app:app --reload
+```
+
+```powershell
+$env:MAP_ADMIN_MOT_DE_PASSE = "un-mot-de-passe-long"   # PowerShell
+uv run uvicorn serveur.app:app --reload
+```
+
+Le mot de passe n'est jamais écrit dans le code ni dans Git. **En production, servir le site
+en HTTPS** : en HTTP simple, le mot de passe circule en clair.
+
+Le tableau de bord porte un encadré **Modèle de langage** : s'il est actif, avec quel
+modèle, si les résumés quotidiens le sont aussi, la date du dernier écrit, et la marche à
+suivre quand ils sont éteints. C'est là qu'il faut regarder quand le récapitulatif
+n'apparaît pas sur le site.
+
+Cinq onglets : tableau de bord, articles à trier, recherche et reclassement, sources (avec
+leur dernier passage, leur disjoncteur et un bouton « Tester sans enregistrer »), et journal
+des collectes avec un bouton « Lancer la collecte » — qui force le passage sans attendre la
+fréquence ni la fin d'une mise en pause.
+
+## Sécurité
+
+| Risque | Ce qui est fait |
+|---|---|
+| **SSRF** — une adresse de flux qui vise le réseau interne | Schéma et adresse IP écrite en clair vérifiés à l'enregistrement ; adresses réellement résolues vérifiées **juste avant chaque requête**, et de nouveau après chaque redirection. `MAP_AUTORISER_RESEAU_LOCAL=1` lève la protection pour le développement. |
+| **Mémoire** — un flux énorme ou sans fin | Lecture bornée à 8 Mio, au-delà la source est abandonnée |
+| **XSS** — du HTML dans un flux | Les balises sont retirées à la collecte, et tout ce qui vient d'un flux repasse par un échappement à l'affichage |
+| **Liens piégés** | Seuls les liens `http(s)` entrent en base ; les liens externes portent `rel="noopener noreferrer"` |
+| **Mot de passe d'administration** | Variable d'environnement, comparaison à temps constant, HTTPS requis en production |
+| **Injection par un titre de flux** dans le modèle de langage | Classement : seul un code de thème de la liste active est accepté en retour, le pire résultat possible étant un mauvais classement. Récapitulatif : le modèle est averti que les titres sont des données, le texte rendu est tronqué, échappé à l'affichage, et annoncé comme automatique. |
+| **Clé d'API du modèle** | Variable d'environnement, jamais dans `config/ia.json`, qui est suivi par Git. Le collecteur refuse de démarrer si le fichier est actif et la variable vide. |
+
+Le contrôle DNS est fait au moment de la requête et non à l'enregistrement : une panne de
+résolution ne doit pas empêcher d'ouvrir la base ni de sauvegarder une source valable.
+
+### Si le serveur sort par un proxy HTTP
+
+Une machine derrière un proxy n'ouvre pas la connexion elle-même : elle la demande au proxy,
+qui résout le nom à sa place. Elle n'a alors souvent **aucun DNS**, et le contrôle par
+adresse IP échoue pour tous les flux — la collecte s'arrête avant d'avoir commencé, sur
+« nom de machine introuvable ». L'adresse que le collecteur résoudrait ne serait de toute
+façon pas celle qui est jointe.
+
+```bash
+MAP_PROXY_RESOUT_LES_NOMS=1 uv run collecteur/collect.py
+```
+
+Ce réglage est **fermé par défaut**, et c'est voulu : mieux vaut une collecte qui échoue
+visiblement qu'un contrôle retiré en silence. L'ouvrir est une décision d'exploitation —
+la politique de sortie devient celle du proxy, à qui il revient de refuser le réseau
+interne. Les contrôles de forme, eux, s'appliquent dans tous les cas : `169.254.169.254`,
+`10.0.0.1`, `localhost` et tout schéma autre que `http(s)` sont refusés avant d'atteindre
+le proxy, et une redirection reste vérifiée. Un hôte listé dans `no_proxy` est joint en
+direct : le contrôle DNS s'y applique normalement.
 
 ## Mise en ligne
 
-Le site a maintenant besoin d'un **serveur qui exécute Python** : GitHub Pages, qui ne sert que des fichiers statiques, ne convient plus. Il faut :
+Il faut un serveur qui exécute Python (GitHub Pages ne convient pas) :
 
-1. **Le serveur web**, lancé en permanence, avec la variable `MAP_ADMIN_MOT_DE_PASSE` définie pour activer l'administration :
+1. **Le serveur web**, en permanence, avec `MAP_ADMIN_MOT_DE_PASSE` :
    ```bash
    uv run uvicorn serveur.app:app --host 0.0.0.0 --port 8000
    ```
-   En production, on le place derrière un serveur HTTPS (nginx, Apache ou IIS) et on le déclare comme service pour qu'il redémarre seul (systemd sous Linux, NSSM sous Windows).
-2. **La collecte quotidienne** (D07), sur la même machine, puisque la base est un fichier local :
-   - Linux (cron), chaque jour à 6 h 15 :
-     ```
-     15 6 * * * cd /chemin/map-veille && /chemin/uv run collecteur/collect.py >> collecte.log 2>&1
-     ```
-   - Windows (tâche planifiée), à lancer une fois dans PowerShell :
-     ```powershell
-     schtasks /Create /TN "MAP collecte" /SC DAILY /ST 06:15 /TR "cmd /c cd /d C:\chemin\map-veille && uv run collecteur/collect.py >> collecte.log 2>&1"
-     ```
-   Le serveur lit la base en lecture seule, et SQLite (mode WAL) autorise cette lecture pendant que la collecte écrit. Il n'y a rien à redémarrer après une collecte.
+   Derrière nginx, Apache ou Caddy en HTTPS, déclaré comme service (systemd) pour qu'il
+   redémarre seul. Avec nginx, laisser passer `/api/direct` sans tampon
+   (`proxy_buffering off;`) — l'en-tête `X-Accel-Buffering: no` s'en charge déjà.
+   Activer brotli au niveau du serveur frontal si l'on veut aller plus loin que gzip.
+2. **La collecte planifiée** (D07), sur la même machine puisque la base est un fichier local.
+   Avec les fréquences par source, une collecte toutes les dix minutes est raisonnable :
+   ```
+   */10 * * * * cd /chemin/map-veille && /chemin/uv run collecteur/collect.py >> collecte.log 2>&1
+   ```
+   Le serveur lit la base en lecture seule et SQLite (mode WAL) autorise cette lecture pendant
+   l'écriture : rien à redémarrer après une collecte.
 3. **Le lien Moodle** (C02) pointe vers l'adresse du serveur.
 
 ### Exemple : Alwaysdata
 
-Sur Alwaysdata, on n'installe pas uv (66 Mo, trop pour l'offre gratuite). On utilise `pip` avec `requirements.txt`, généré depuis `uv.lock`. Remplacer `NOM` par le nom du compte Alwaysdata.
+Sur Alwaysdata, on n'installe pas uv (66 Mo, trop pour l'offre gratuite) : on utilise `pip`
+avec `requirements.txt`, généré depuis `uv.lock`. Remplacer `NOM` par le nom du compte.
 
-1. **Environnement > Python** : choisir la version 3.12.
-2. **En SSH** (`ssh NOM@ssh-NOM.alwaysdata.net`), récupérer le code et installer :
+1. **Environnement > Python** : version 3.12.
+2. **En SSH** (`ssh NOM@ssh-NOM.alwaysdata.net`) :
    ```bash
-   git clone git@github.com:bastien37/map-veille.git ~/map-veille   # clé de déploiement GitHub, voir ci-dessous
+   git clone git@github.com:wakadu13/map-veille.git ~/map-veille
    cd ~/map-veille
    python -m venv .venv
    .venv/bin/python -m pip install -r requirements.txt
@@ -190,42 +679,102 @@ Sur Alwaysdata, on n'installe pas uv (66 Mo, trop pour l'offre gratuite). On uti
    - commande : `/home/NOM/map-veille/.venv/bin/uvicorn serveur.app:app --host $IP --port $PORT`
    - répertoire de travail : `/home/NOM/map-veille`
    - variable d'environnement : `MAP_ADMIN_MOT_DE_PASSE=...`
-4. **Avancé > Tâches planifiées**, une commande chaque jour (`15 6 * * *`) :
-   `cd /home/NOM/map-veille && .venv/bin/python collecteur/collect.py`
-5. **Mise à jour** du code :
-   ```bash
-   cd ~/map-veille && git pull && .venv/bin/python -m pip install -r requirements.txt
-   ```
-   puis redémarrer le site dans **Web > Sites**.
+4. **Avancé > Tâches planifiées** : `cd /home/NOM/map-veille && .venv/bin/python collecteur/collect.py`
+5. **Mise à jour** : `git pull && .venv/bin/python -m pip install -r requirements.txt`, puis
+   redémarrer le site.
 
-Pour un dépôt privé, on donne au serveur une **clé de déploiement** en lecture seule. On la crée en SSH (`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""`), puis on colle `~/.ssh/id_ed25519.pub` dans GitHub, *Settings > Deploy keys*.
+Pour un dépôt privé, donner au serveur une **clé de déploiement** en lecture seule
+(`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""`, puis coller la clé publique dans GitHub,
+*Settings > Deploy keys*).
 
-Après chaque `uv add`, il faut régénérer `requirements.txt` :
-`uv export --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt`, puis remettre les trois lignes de commentaire en tête du fichier.
+Après chaque `uv add`, régénérer `requirements.txt` :
+`uv export --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt`,
+puis remettre les lignes de commentaire en tête.
 
-Options possibles : un serveur de l'École (le plus adapté au contexte, à voir avec le service informatique), ou un hébergeur Python comme PythonAnywhere, Render ou Alwaysdata. Ce dernier est français et propose une offre gratuite limitée. Dans tous les cas, l'hébergeur doit autoriser une tâche planifiée et l'accès sortant aux sites des sources.
+## Mesures
 
-Le workflow GitHub `.github/workflows/tests.yml` ne publie plus le site : il lance seulement les tests à chaque modification du code.
+Le dossier `bancs/` contient des bancs de mesure reproductibles, et les rapports :
 
-## Ajouter une source
+- `bancs/RAPPORT-phase1.md` — audit de départ, goulots trouvés par profilage ;
+- `bancs/DECISION-phase2.md` — comparaison Python / Go / Rust et choix du stockage ;
+- `bancs/RESULTATS-phase4.md` — tableau avant / après.
 
-- **Un flux RSS, ou une source GDACS ou ReliefWeb avec d'autres réglages** : dans l'administration, onglet **Sources**, « Ajouter une source ». Testez-la avant de l'enregistrer.
-- **Un nouveau type d'API** : il faut du code.
-  1. Écrire une fonction `source_xxx(s, hors_ligne, ...)` dans `collect.py`. Elle renvoie une liste construite avec `article(titre, lien, date, source, resume, zone=, theme=)`.
-  2. L'appeler dans `collecter_source()`.
-  3. Ajouter le type dans `TYPES_SOURCES` et dans la contrainte `CHECK` de la table `sources` (`base.py`).
+```bash
+uv run bancs/serveur_flux.py --port 8910 --flux 100   # serveur de flux, dans un terminal à part
+uv run bancs/bench_ingestion.py --flux 100 --port 8911
+uv run bancs/gen_base.py && uv run bancs/bench_api.py
+uv run bancs/bench_lieux.py                           # precision de la localisation
+node bancs/bench_accessibilite.mjs http://127.0.0.1:8000/
+```
 
-  Le tri, les doublons et le stockage sont gérés en commun.
+### Ce que donnent les vraies dépêches
+
+Mesure du 28 octobre 2026 : les 45 flux actifs interrogés une fois, **1 372 articles réels**
+passés dans le tri et la localisation, sans rien enregistrer.
+
+| | |
+|---|---|
+| Articles placés sur la carte | 833 (**61 %**) |
+| Diffusés sous l'ancienne règle (zone **et** thème) | 867 (**63 %**) |
+| Diffusés sous la règle actuelle (D04 révisée) | 1 297 (**95 %**) |
+| Non classés par les mots-clés, flux sans thème imposé | 53 sur 157 (**34 %**) |
+
+Les 61 % de placement sont en dessous des 81 % mesurés sur le banc de flux : c'est attendu,
+le banc rejoue des dépêches d'agence, qui nomment presque toujours un lieu, là où une note
+d'institut s'intitule « Vers un ordre multipolaire ? ».
+
+Les 34 % d'articles non classés par les mots-clés sont exactement la population que le
+classement par IA viserait, et une bonne base pour juger s'il apporte quelque chose.
+
+C'est cette mesure qui a conduit à réviser D04 : **430 articles de plus sont diffusés**
+(204 de `cyb`, 181 de `geo`, 45 de `def`), et la carte n'a pas bougé d'un point, puisqu'elle
+ne montre que les articles localisés. Les 75 restants se répartissent en 53 sans aucun thème
+— la cible du classement par IA — et 22 qui ont un thème trouvé par mots-clés mais viennent
+d'un flux généraliste, donc sans garantie.
+
+### Pourquoi Python, et quand rouvrir la question
+
+Le choix de rester en Python plutôt que de passer à Go repose sur des mesures, pas sur une
+préférence : à l'échelle visée l'écart est de 3 s par collecte, et `encoding/xml` rejette les
+flux mal formés que `feedparser` répare. Le dossier complet est dans
+`bancs/DECISION-phase2.md`.
+
+**Seuils à partir desquels re-mesurer** avec `bancs/` :
+
+| Signal | Seuil indicatif |
+|---|---|
+| Nombre de flux | au-delà de ~500 |
+| Fréquence de collecte | toutes les 5 minutes ou moins |
+| Durée d'une collecte | plus de 30 s de façon répétée |
+| Articles en base | au-delà de 500 000 (re-mesurer aussi SQLite contre PostgreSQL/PostGIS) |
+| p95 de l'API | plus de 100 ms |
 
 ## Codes
 
-Codes des zones : `eur` Europe, `rus` Russie et Europe de l'Est, `mena` Moyen-Orient et Afrique du Nord, `afr` Afrique subsaharienne, `asi` Asie et Indo-Pacifique, `ame` Amériques.
+Zones : `eur` Europe, `rus` Russie et Europe de l'Est, `mena` Moyen-Orient et Afrique du Nord,
+`afr` Afrique subsaharienne, `asi` Asie et Indo-Pacifique, `ame` Amériques.
 
-Codes des thèmes : `def` Conflits et défense, `dip` Diplomatie et RI, `eco` Économie et énergie, `tec` Sciences, technologies et espace, `cli` Climat et catastrophes naturelles.
+Les thèmes ne sont plus codés en dur : voir `config/themes.json`.
 
 ## Points à valider (lot LT3)
 
-- Les adresses des flux et les conditions d'utilisation de chaque source (C03, C04).
-- Les listes de mots-clés : les enrichir à partir de `admin.py a-trier` après quelques jours de collecte.
-- Les cas limites de zones : la Turquie et le Soudan sont classés en Moyen-Orient et Afrique du Nord, le Groenland en Europe.
-- Le thème par défaut des rapports ReliefWeb (`theme_defaut`, actuellement Diplomatie et RI).
+- **Les cinq sources bloquées par filtrage anti-robot** (IFRI, Chatham House, ECFR,
+  Géoconfluences, ANSSI) : leur écrire pour demander un accès, ou s'en passer.
+- Les conditions d'utilisation de chaque source (C03, C04), et celles du fournisseur de
+  modèle si le classement par IA est activé.
+- **Le classement par IA et le récapitulatif sur des données réelles** : ils n'ont été
+  vérifiés que sur des réponses simulées. Après quelques jours, comparer `admin.py ia` et
+  `admin.py a-trier` pour savoir si le classement apporte quelque chose et avec quel taux
+  d'erreur, et relire quelques récapitulatifs pour vérifier qu'ils n'inventent rien.
+- **Les mots-clés de `cyb` hors flux spécialisés** : sur 157 articles de flux généralistes,
+  un seul a été classé en `cyb` par les mots-clés. L'échantillon est petit, mais il faudra
+  vérifier après quelques jours que ce n'est pas un trou dans la liste.
+- Les mots-clés : les enrichir à partir de `admin.py a-trier` après quelques jours.
+- Les cas limites de zones : la Turquie et le Soudan sont en Moyen-Orient et Afrique du Nord,
+  le Groenland en Europe.
+- Les exonymes français (`config/exonymes.json`) et les noms à ignorer
+  (`config/lieux_ignores.json`), à enrichir dès qu'un cas réel est mal traité.
+- Le fond de carte : rester sur les tuiles OpenStreetMap ou installer son propre serveur.
+- **D04 a été révisée** (voir « Ce qui est diffusé, et ce qui ne l'est pas ») : à surveiller
+  sur quelques jours, pour vérifier qu'aucun flux à thème imposé ne fait entrer du bruit
+  dans le fil maintenant qu'il n'a plus besoin de zone.

@@ -1,0 +1,265 @@
+{
+ "_commentaire": "Corpus annoté à la main pour mesurer l'extraction de lieux. Chaque entrée : titre, résumé, et nom GeoNames attendu (null = l'article ne doit PAS être placé sur la carte). Sert à la fois de test (tests/test_lieux.py) et de mesure (bancs/bench_lieux.py). À enrichir dès qu'un cas réel est mal traité.",
+ "cas": [
+  {
+   "titre": "Ukraine : nouvelles frappes de drones russes sur Kharkiv",
+   "resume": "L'armée ukrainienne riposte",
+   "attendu": "Kharkiv"
+  },
+  {
+   "titre": "Sommet européen à Bruxelles sur le budget de défense",
+   "resume": "",
+   "attendu": "Bruxelles"
+  },
+  {
+   "titre": "Sénégal : Dakar renégocie ses contrats pétroliers",
+   "resume": "",
+   "attendu": "Dakar"
+  },
+  {
+   "titre": "Le Caire accueille des pourparlers",
+   "resume": "Égypte",
+   "attendu": "Le Caire"
+  },
+  {
+   "titre": "Londres et Berlin signent un accord de défense",
+   "resume": "",
+   "attendu": "Londres"
+  },
+  {
+   "titre": "Explosion à Beyrouth : le port de nouveau fermé",
+   "resume": "Liban",
+   "attendu": "Beyrouth"
+  },
+  {
+   "titre": "Inondations à Lagos : des milliers de déplacés",
+   "resume": "",
+   "attendu": "Lagos"
+  },
+  {
+   "titre": "Pékin durcit le ton sur les semi-conducteurs",
+   "resume": "",
+   "attendu": "Pékin"
+  },
+  {
+   "titre": "Séisme près de Katmandou",
+   "resume": "Népal",
+   "attendu": "Katmandou"
+  },
+  {
+   "titre": "Manifestations à Tbilissi contre la loi sur les agents étrangers",
+   "resume": "",
+   "attendu": "Tbilissi"
+  },
+  {
+   "titre": "Marioupol : la reconstruction au point mort",
+   "resume": "",
+   "attendu": "Marioupol"
+  },
+  {
+   "titre": "La Mecque se prépare au pèlerinage",
+   "resume": "",
+   "attendu": "La Mecque"
+  },
+  {
+   "titre": "Nouvelle-Orléans : alerte cyclonique",
+   "resume": "La Nouvelle-Orléans se prépare",
+   "attendu": "La Nouvelle-Orléans"
+  },
+  {
+   "titre": "Cracovie accueille le sommet de l'OTAN",
+   "resume": "",
+   "attendu": "Cracovie"
+  },
+  {
+   "titre": "Saint-Pétersbourg : incendie dans un entrepôt",
+   "resume": "",
+   "attendu": "Saint-Pétersbourg"
+  },
+  {
+   "titre": "Brésil : Lula annonce un plan contre la déforestation",
+   "resume": "",
+   "attendu": "Brésil"
+  },
+  {
+   "titre": "Le Japon relance ses réacteurs nucléaires",
+   "resume": "",
+   "attendu": "Japon"
+  },
+  {
+   "titre": "Tempête sur la côte est des États-Unis",
+   "resume": "",
+   "attendu": "États-Unis"
+  },
+  {
+   "titre": "Madagascar frappé par une sécheresse historique",
+   "resume": "",
+   "attendu": "Madagascar"
+  },
+  {
+   "titre": "L'Argentine négocie avec le FMI",
+   "resume": "",
+   "attendu": "Argentine"
+  },
+  {
+   "titre": "Moscow police arrest hundreds of protesters",
+   "resume": "Russia tightens control",
+   "attendu": "Moscou"
+  },
+  {
+   "titre": "Flooding in Jakarta displaces thousands",
+   "resume": "Indonesia",
+   "attendu": "Jakarta"
+  },
+  {
+   "titre": "Nairobi summit opens on climate finance",
+   "resume": "",
+   "attendu": "Nairobi"
+  },
+  {
+   "titre": "Ottawa unveils new sanctions package",
+   "resume": "Canada",
+   "attendu": "Ottawa"
+  },
+  {
+   "titre": "Taiwan reports new incursions",
+   "resume": "",
+   "attendu": "Taïwan"
+  },
+  {
+   "titre": "Severe drought hits Somalia",
+   "resume": "",
+   "attendu": "Somalie"
+  },
+  {
+   "titre": "La marche de l'union nationale rassemble des milliers de personnes",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Le canton de Vaud vote son budget",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Une belle tournée de concerts",
+   "resume": "des tours de chant",
+   "attendu": null
+  },
+  {
+   "titre": "Nice ambiance au conseil municipal",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Le port du masque reste conseillé",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Mobilisation générale dans la fonction publique",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Réforme des retraites : le débat reprend à l'Assemblée",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Inflation : la hausse des prix ralentit",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Le prix Nobel de physique décerné",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Une nouvelle étude sur le sommeil",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Les marchés financiers en forte baisse",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Hausse du chômage au troisième trimestre",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Moscou rappelle son ambassadeur",
+   "resume": "Russie",
+   "attendu": "Moscou"
+  },
+  {
+   "titre": "Vienne accueille les négociations sur le nucléaire",
+   "resume": "Autriche",
+   "attendu": "Vienne"
+  },
+  {
+   "titre": "Athènes obtient un nouveau prêt",
+   "resume": "Grèce",
+   "attendu": "Athènes"
+  },
+  {
+   "titre": "Naples : éruption redoutée du Vésuve",
+   "resume": "Italie",
+   "attendu": "Naples"
+  },
+  {
+   "titre": "Allemagne : manifestation monstre à Hambourg",
+   "resume": "",
+   "attendu": "Hambourg"
+  },
+  {
+   "titre": "Chine : Shanghai reconfinée",
+   "resume": "",
+   "attendu": "Shanghai"
+  },
+  {
+   "titre": "Nigeria : Abuja renforce la sécurité",
+   "resume": "",
+   "attendu": "Abuja"
+  },
+  {
+   "titre": "Inde : New Delhi suffoque sous la pollution",
+   "resume": "",
+   "attendu": "New Delhi"
+  },
+  {
+   "titre": "Guerre à Gaza : nouvelle trêve annoncée",
+   "resume": "",
+   "attendu": "Bande de Gaza"
+  },
+  {
+   "titre": "Cisjordanie : nouvelle opération israélienne",
+   "resume": "",
+   "attendu": "Cisjordanie"
+  },
+  {
+   "titre": "Le Sahel face à la poussée djihadiste",
+   "resume": "",
+   "attendu": "Sahel"
+  },
+  {
+   "titre": "Haut-Karabagh : exode des populations",
+   "resume": "",
+   "attendu": "Haut-Karabagh"
+  },
+  {
+   "titre": "Le président français reçoit son homologue allemand",
+   "resume": "",
+   "attendu": null
+  },
+  {
+   "titre": "Les Européens divisés sur l'élargissement",
+   "resume": "",
+   "attendu": null
+  }
+ ]
+}

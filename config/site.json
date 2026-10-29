@@ -1,0 +1,4 @@
+{
+  "_commentaire": "Réglages d'affichage du site. Ils ne changent rien à la collecte : tout continue d'être ramassé et rangé en base, c'est seulement ce que le visiteur voit en arrivant qui se décide ici.\n\nlangue_par_defaut : langue sur laquelle le site s'ouvre.\n  \"fr\"   le fil et la carte ne montrent que les sources francophones à l'arrivée ;\n         les sources anglaises sont toujours collectées, et une puce suffit à les afficher.\n  \"en\"   l'inverse.\n  null   toutes les langues, comme avant l'existence de ce réglage.\n\nLe choix du visiteur l'emporte : dès qu'il touche une puce de langue, sa préférence est retenue dans son navigateur et ce réglage ne s'applique plus à lui. Il ne vaut que pour une première visite, ou après effacement des données du site.\n\nCe fichier est relu à chaud : le modifier suffit, sans redémarrer le serveur.",
+  "langue_par_defaut": "fr"
+}

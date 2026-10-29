@@ -1,0 +1,937 @@
+{
+ "_commentaire": "Noms français des lieux quand ils diffèrent du nom de GeoNames (clé = nom GeoNames, valeur = autres noms acceptés). Ce fichier est relu à la main : GeoNames fournit bien des « alternatenames », mais toutes langues mélangées et sans étiquette (London y donne Landan, Londe, Ljondan…), ce qui placerait des articles n'importe où. Mieux vaut un lieu manquant qu'un point faux. À compléter librement, puis relancer outils/construire_gazetteer.py.",
+ "_commentaire_affichage": "« affichage » : nom montré au visiteur quand il diffère du nom GeoNames. La liste « villes » ci-dessous sert à RECONNAÎTRE un lieu dans un titre, et accepte pour cela des formes datées ou concurrentes (Kharkov, Madras, Bombay) qui feraient de mauvais noms d'affichage. Celle-ci ne sert qu'à l'affichage, et ne retient que les exonymes français courants. Les PAYS n'y figurent pas : leur nom français vient de collecteur/pays.json. Retirer une ligne rend son nom GeoNames à la ville.",
+ "affichage": {
+  "A Coruña": "La Corogne",
+  "Aachen": "Aix-la-Chapelle",
+  "Abu Dhabi": "Abou Dabi",
+  "Addis Ababa": "Addis-Abeba",
+  "Aleppo": "Alep",
+  "Algiers": "Alger",
+  "Antwerp": "Anvers",
+  "Athens": "Athènes",
+  "Baghdad": "Bagdad",
+  "Baku": "Bakou",
+  "Basel": "Bâle",
+  "Basrah": "Bassorah",
+  "Beijing": "Pékin",
+  "Beirut": "Beyrouth",
+  "Bern": "Berne",
+  "Bologna": "Bologne",
+  "Brugge": "Bruges",
+  "Brussels": "Bruxelles",
+  "Bucharest": "Bucarest",
+  "Cairo": "Le Caire",
+  "Cape Town": "Le Cap",
+  "Copenhagen": "Copenhague",
+  "Damascus": "Damas",
+  "Dresden": "Dresde",
+  "Edinburgh": "Édimbourg",
+  "Frankfurt am Main": "Francfort",
+  "Geneva": "Genève",
+  "Genoa": "Gênes",
+  "Gent": "Gand",
+  "Gothenburg": "Göteborg",
+  "Hamburg": "Hambourg",
+  "Havana": "La Havane",
+  "Ho Chi Minh City": "Hô Chi Minh-Ville",
+  "Isfahan": "Ispahan",
+  "Jeddah": "Djeddah",
+  "Juba": "Djouba",
+  "Kabul": "Kaboul",
+  "Kathmandu": "Katmandou",
+  "Kraków": "Cracovie",
+  "Kuwait City": "Koweït",
+  "Köln": "Cologne",
+  "Lhasa": "Lhassa",
+  "Lisbon": "Lisbonne",
+  "London": "Londres",
+  "Macau": "Macao",
+  "Mainz": "Mayence",
+  "Makkah": "La Mecque",
+  "Manila": "Manille",
+  "Mariupol": "Marioupol",
+  "Marrakesh": "Marrakech",
+  "Mashhad": "Mechhed",
+  "Medina": "Médine",
+  "Mexico City": "Mexico",
+  "Mogadishu": "Mogadiscio",
+  "Moscow": "Moscou",
+  "Mosul": "Mossoul",
+  "N'Djamena": "Ndjamena",
+  "Nanjing": "Nankin",
+  "New Orleans": "La Nouvelle-Orléans",
+  "New York City": "New York",
+  "Nicosia": "Nicosie",
+  "Nizhniy Novgorod": "Nijni Novgorod",
+  "Novosibirsk": "Novossibirsk",
+  "Padua": "Padoue",
+  "Palermo": "Palerme",
+  "Philadelphia": "Philadelphie",
+  "Pisa": "Pise",
+  "Riyadh": "Riyad",
+  "Saint Petersburg": "Saint-Pétersbourg",
+  "Santo Domingo": "Saint-Domingue",
+  "Sevilla": "Séville",
+  "Singapore": "Singapour",
+  "Sulaymaniyah": "Souleimaniye",
+  "Tangier": "Tanger",
+  "Tashkent": "Tachkent",
+  "Tbilisi": "Tbilissi",
+  "Tehran": "Téhéran",
+  "The Hague": "La Haye",
+  "Thessaloníki": "Thessalonique",
+  "Valletta": "La Valette",
+  "Venice": "Venise",
+  "Vienna": "Vienne",
+  "Warsaw": "Varsovie",
+  "Washington, D.C.": "Washington",
+  "Yekaterinburg": "Iekaterinbourg",
+  "Yerevan": "Erevan",
+  "Zaragoza": "Saragosse"
+ },
+ "villes": {
+  "London": [
+   "Londres"
+  ],
+  "Moscow": [
+   "Moscou"
+  ],
+  "Beijing": [
+   "Pékin"
+  ],
+  "Warsaw": [
+   "Varsovie"
+  ],
+  "Vienna": [
+   "Vienne"
+  ],
+  "Geneva": [
+   "Genève"
+  ],
+  "Köln": [
+   "Cologne"
+  ],
+  "Sevilla": [
+   "Séville"
+  ],
+  "Copenhagen": [
+   "Copenhague"
+  ],
+  "Edinburgh": [
+   "Édimbourg"
+  ],
+  "Lisbon": [
+   "Lisbonne"
+  ],
+  "Athens": [
+   "Athènes"
+  ],
+  "Bucharest": [
+   "Bucarest"
+  ],
+  "Cairo": [
+   "Le Caire"
+  ],
+  "Algiers": [
+   "Alger"
+  ],
+  "Damascus": [
+   "Damas"
+  ],
+  "Baghdad": [
+   "Bagdad"
+  ],
+  "Tehran": [
+   "Téhéran"
+  ],
+  "Makkah": [
+   "La Mecque"
+  ],
+  "Jerusalem": [
+   "Jérusalem"
+  ],
+  "Kyiv": [
+   "Kiev"
+  ],
+  "Saint Petersburg": [
+   "Saint-Pétersbourg"
+  ],
+  "Guangzhou": [
+   "Canton"
+  ],
+  "Seoul": [
+   "Séoul"
+  ],
+  "Mumbai": [
+   "Bombay"
+  ],
+  "Kolkata": [
+   "Calcutta"
+  ],
+  "Singapore": [
+   "Singapour"
+  ],
+  "Manila": [
+   "Manille"
+  ],
+  "New York City": [
+   "New York"
+  ],
+  "New Orleans": [
+   "La Nouvelle-Orléans",
+   "Nouvelle-Orléans"
+  ],
+  "Mexico City": [
+   "Mexico"
+  ],
+  "Havana": [
+   "La Havane"
+  ],
+  "Bogotá": [
+   "Bogota"
+  ],
+  "Brasília": [
+   "Brasilia"
+  ],
+  "Kraków": [
+   "Cracovie"
+  ],
+  "Antwerp": [
+   "Anvers"
+  ],
+  "Gent": [
+   "Gand"
+  ],
+  "The Hague": [
+   "La Haye"
+  ],
+  "Brugge": [
+   "Bruges"
+  ],
+  "Venice": [
+   "Venise"
+  ],
+  "Genoa": [
+   "Gênes"
+  ],
+  "Basel": [
+   "Bâle"
+  ],
+  "Zürich": [
+   "Zurich"
+  ],
+  "Nicosia": [
+   "Nicosie"
+  ],
+  "Valletta": [
+   "La Valette"
+  ],
+  "Reykjavík": [
+   "Reykjavik"
+  ],
+  "Gothenburg": [
+   "Göteborg"
+  ],
+  "Chisinau": [
+   "Chisinau"
+  ],
+  "Tbilisi": [
+   "Tbilissi"
+  ],
+  "Yerevan": [
+   "Erevan"
+  ],
+  "Baku": [
+   "Bakou"
+  ],
+  "Tashkent": [
+   "Tachkent"
+  ],
+  "Riyadh": [
+   "Riyad"
+  ],
+  "Kuwait City": [
+   "Koweït"
+  ],
+  "Addis Ababa": [
+   "Addis-Abeba"
+  ],
+  "Marrakesh": [
+   "Marrakech"
+  ],
+  "Antananarivo": [
+   "Tananarive"
+  ],
+  "Cape Town": [
+   "Le Cap"
+  ],
+  "Dar es Salaam": [
+   "Dar es Salam"
+  ],
+  "Hanoi": [
+   "Hanoï"
+  ],
+  "Ho Chi Minh City": [
+   "Hô Chi Minh-Ville",
+   "Saigon"
+  ],
+  "Yangon": [
+   "Rangoun"
+  ],
+  "Kathmandu": [
+   "Katmandou"
+  ],
+  "Dhaka": [
+   "Dacca"
+  ],
+  "Chennai": [
+   "Madras"
+  ],
+  "Bengaluru": [
+   "Bangalore"
+  ],
+  "Québec": [
+   "Quebec"
+  ],
+  "Montréal": [
+   "Montreal"
+  ],
+  "Santiago": [
+   "Santiago du Chili"
+  ],
+  "Asunción": [
+   "Asuncion"
+  ],
+  "San José": [
+   "San Jose"
+  ],
+  "Panama City": [
+   "Panama"
+  ],
+  "Munich": [
+   "Munich"
+  ],
+  "Florence": [
+   "Florence"
+  ],
+  "Naples": [
+   "Naples"
+  ],
+  "Turin": [
+   "Turin"
+  ],
+  "Brussels": [
+   "Bruxelles"
+  ],
+  "Rome": [
+   "Rome"
+  ],
+  "Madrid": [
+   "Madrid"
+  ],
+  "Berlin": [
+   "Berlin"
+  ],
+  "Stockholm": [
+   "Stockholm"
+  ],
+  "Oslo": [
+   "Oslo"
+  ],
+  "Dublin": [
+   "Dublin"
+  ],
+  "Luxembourg": [
+   "Luxembourg"
+  ],
+  "Bern": [
+   "Berne"
+  ],
+  "Ljubljana": [
+   "Ljubljana"
+  ],
+  "Zagreb": [
+   "Zagreb"
+  ],
+  "Sarajevo": [
+   "Sarajevo"
+  ],
+  "Skopje": [
+   "Skopje"
+  ],
+  "Tirana": [
+   "Tirana"
+  ],
+  "Podgorica": [
+   "Podgorica"
+  ],
+  "Pristina": [
+   "Pristina"
+  ],
+  "Sofia": [
+   "Sofia"
+  ],
+  "Minsk": [
+   "Minsk"
+  ],
+  "Vilnius": [
+   "Vilnius"
+  ],
+  "Riga": [
+   "Riga"
+  ],
+  "Bratislava": [
+   "Bratislava"
+  ],
+  "Budapest": [
+   "Budapest"
+  ],
+  "Hamburg": [
+   "Hambourg"
+  ],
+  "Frankfurt am Main": [
+   "Francfort"
+  ],
+  "Nuremberg": [
+   "Nuremberg"
+  ],
+  "Stuttgart": [
+   "Stuttgart"
+  ],
+  "Dresden": [
+   "Dresde"
+  ],
+  "Aachen": [
+   "Aix-la-Chapelle"
+  ],
+  "Mainz": [
+   "Mayence"
+  ],
+  "Rotterdam": [
+   "Rotterdam"
+  ],
+  "Liège": [
+   "Liege"
+  ],
+  "Charleroi": [
+   "Charleroi"
+  ],
+  "Milan": [
+   "Milan"
+  ],
+  "Bologna": [
+   "Bologne"
+  ],
+  "Padua": [
+   "Padoue"
+  ],
+  "Pisa": [
+   "Pise"
+  ],
+  "Syracuse": [
+   "Syracuse"
+  ],
+  "Bari": [
+   "Bari"
+  ],
+  "Palermo": [
+   "Palerme"
+  ],
+  "A Coruña": [
+   "La Corogne"
+  ],
+  "Zaragoza": [
+   "Saragosse"
+  ],
+  "Córdoba": [
+   "Cordoba"
+  ],
+  "Porto": [
+   "Porto"
+  ],
+  "Thessaloníki": [
+   "Thessalonique"
+  ],
+  "Odesa": [
+   "Odessa"
+  ],
+  "Lviv": [
+   "Lviv"
+  ],
+  "Kharkiv": [
+   "Kharkov"
+  ],
+  "Donetsk": [
+   "Donetsk"
+  ],
+  "Mariupol": [
+   "Marioupol"
+  ],
+  "Nizhniy Novgorod": [
+   "Nijni Novgorod"
+  ],
+  "Yekaterinburg": [
+   "Iekaterinbourg"
+  ],
+  "Novosibirsk": [
+   "Novossibirsk"
+  ],
+  "Vladivostok": [
+   "Vladivostok"
+  ],
+  "Beirut": [
+   "Beyrouth"
+  ],
+  "Amman": [
+   "Amman"
+  ],
+  "Mosul": [
+   "Mossoul"
+  ],
+  "Basrah": [
+   "Bassorah"
+  ],
+  "Aleppo": [
+   "Alep"
+  ],
+  "Homs": [
+   "Homs"
+  ],
+  "Idlib": [
+   "Idlib"
+  ],
+  "Raqqa": [
+   "Raqqa"
+  ],
+  "Sulaymaniyah": [
+   "Souleimaniye"
+  ],
+  "Erbil": [
+   "Erbil"
+  ],
+  "Isfahan": [
+   "Ispahan"
+  ],
+  "Mashhad": [
+   "Mechhed"
+  ],
+  "Tabriz": [
+   "Tabriz"
+  ],
+  "Aden": [
+   "Aden"
+  ],
+  "Sanaa": [
+   "Sanaa"
+  ],
+  "Jeddah": [
+   "Djeddah"
+  ],
+  "Medina": [
+   "Médine"
+  ],
+  "Abu Dhabi": [
+   "Abou Dabi"
+  ],
+  "Dubai": [
+   "Dubaï"
+  ],
+  "Tripoli": [
+   "Tripoli"
+  ],
+  "Benghazi": [
+   "Benghazi"
+  ],
+  "Oran": [
+   "Oran"
+  ],
+  "Constantine": [
+   "Constantine"
+  ],
+  "Fès": [
+   "Fes"
+  ],
+  "Rabat": [
+   "Rabat"
+  ],
+  "Tangier": [
+   "Tanger"
+  ],
+  "Dakar": [
+   "Dakar"
+  ],
+  "Bamako": [
+   "Bamako"
+  ],
+  "Ouagadougou": [
+   "Ouagadougou"
+  ],
+  "Niamey": [
+   "Niamey"
+  ],
+  "N'Djamena": [
+   "Ndjamena"
+  ],
+  "Lagos": [
+   "Lagos"
+  ],
+  "Abuja": [
+   "Abuja"
+  ],
+  "Accra": [
+   "Accra"
+  ],
+  "Lomé": [
+   "Lome"
+  ],
+  "Cotonou": [
+   "Cotonou"
+  ],
+  "Douala": [
+   "Douala"
+  ],
+  "Yaoundé": [
+   "Yaounde"
+  ],
+  "Libreville": [
+   "Libreville"
+  ],
+  "Brazzaville": [
+   "Brazzaville"
+  ],
+  "Luanda": [
+   "Luanda"
+  ],
+  "Lusaka": [
+   "Lusaka"
+  ],
+  "Harare": [
+   "Harare"
+  ],
+  "Maputo": [
+   "Maputo"
+  ],
+  "Nairobi": [
+   "Nairobi"
+  ],
+  "Kampala": [
+   "Kampala"
+  ],
+  "Kigali": [
+   "Kigali"
+  ],
+  "Mogadishu": [
+   "Mogadiscio"
+  ],
+  "Juba": [
+   "Djouba"
+  ],
+  "Asmara": [
+   "Asmara"
+  ],
+  "Djibouti": [
+   "Djibouti"
+  ],
+  "Durban": [
+   "Durban"
+  ],
+  "Pretoria": [
+   "Pretoria"
+  ],
+  "Lahore": [
+   "Lahore"
+  ],
+  "Islamabad": [
+   "Islamabad"
+  ],
+  "Kabul": [
+   "Kaboul"
+  ],
+  "Kandahar": [
+   "Kandahar"
+  ],
+  "Delhi": [
+   "Delhi"
+  ],
+  "Hyderabad": [
+   "Hyderabad"
+  ],
+  "Ahmedabad": [
+   "Ahmedabad"
+  ],
+  "Pune": [
+   "Pune"
+  ],
+  "Shenzhen": [
+   "Shenzhen"
+  ],
+  "Chongqing": [
+   "Chongqing"
+  ],
+  "Tianjin": [
+   "Tianjin"
+  ],
+  "Wuhan": [
+   "Wuhan"
+  ],
+  "Chengdu": [
+   "Chengdu"
+  ],
+  "Xi'an": [
+   "Xian"
+  ],
+  "Shenyang": [
+   "Shenyang"
+  ],
+  "Harbin": [
+   "Harbin"
+  ],
+  "Nanjing": [
+   "Nankin"
+  ],
+  "Hangzhou": [
+   "Hangzhou"
+  ],
+  "Ürümqi": [
+   "Urumqi"
+  ],
+  "Lhasa": [
+   "Lhassa"
+  ],
+  "Macau": [
+   "Macao"
+  ],
+  "Kaohsiung": [
+   "Kaohsiung"
+  ],
+  "Busan": [
+   "Busan"
+  ],
+  "Incheon": [
+   "Incheon"
+  ],
+  "Nagoya": [
+   "Nagoya"
+  ],
+  "Sapporo": [
+   "Sapporo"
+  ],
+  "Fukuoka": [
+   "Fukuoka"
+  ],
+  "Hiroshima": [
+   "Hiroshima"
+  ],
+  "Nagasaki": [
+   "Nagasaki"
+  ],
+  "Surabaya": [
+   "Surabaya"
+  ],
+  "Bandung": [
+   "Bandung"
+  ],
+  "Medan": [
+   "Medan"
+  ],
+  "Kuala Lumpur": [
+   "Kuala Lumpur"
+  ],
+  "Cebu City": [
+   "Cebu"
+  ],
+  "Davao": [
+   "Davao"
+  ],
+  "Brisbane": [
+   "Brisbane"
+  ],
+  "Perth": [
+   "Perth"
+  ],
+  "Adelaide": [
+   "Adélaïde"
+  ],
+  "Christchurch": [
+   "Christchurch"
+  ],
+  "Toronto": [
+   "Toronto"
+  ],
+  "Calgary": [
+   "Calgary"
+  ],
+  "Ottawa": [
+   "Ottawa"
+  ],
+  "Chicago": [
+   "Chicago"
+  ],
+  "Los Angeles": [
+   "Los Angeles"
+  ],
+  "Houston": [
+   "Houston"
+  ],
+  "Philadelphia": [
+   "Philadelphie"
+  ],
+  "San Francisco": [
+   "San Francisco"
+  ],
+  "Boston": [
+   "Boston"
+  ],
+  "Seattle": [
+   "Seattle"
+  ],
+  "Miami": [
+   "Miami"
+  ],
+  "Detroit": [
+   "Détroit"
+  ],
+  "Atlanta": [
+   "Atlanta"
+  ],
+  "Dallas": [
+   "Dallas"
+  ],
+  "Denver": [
+   "Denver"
+  ],
+  "Guadalajara": [
+   "Guadalajara"
+  ],
+  "Monterrey": [
+   "Monterrey"
+  ],
+  "Tijuana": [
+   "Tijuana"
+  ],
+  "São Paulo": [
+   "Sao Paulo"
+  ],
+  "Rio de Janeiro": [
+   "Rio de Janeiro"
+  ],
+  "Salvador": [
+   "Salvador"
+  ],
+  "Belo Horizonte": [
+   "Belo Horizonte"
+  ],
+  "Recife": [
+   "Recife"
+  ],
+  "Manaus": [
+   "Manaus"
+  ],
+  "Rosario": [
+   "Rosario"
+  ],
+  "Medellín": [
+   "Medellin"
+  ],
+  "Cali": [
+   "Cali"
+  ],
+  "Guayaquil": [
+   "Guayaquil"
+  ],
+  "Quito": [
+   "Quito"
+  ],
+  "La Paz": [
+   "La Paz"
+  ],
+  "Maracaibo": [
+   "Maracaibo"
+  ],
+  "Port-au-Prince": [
+   "Port-au-Prince"
+  ],
+  "Santo Domingo": [
+   "Saint-Domingue"
+  ],
+  "Kingston": [
+   "Kingston"
+  ],
+  "San Salvador": [
+   "San Salvador"
+  ],
+  "Tegucigalpa": [
+   "Tegucigalpa"
+  ],
+  "Managua": [
+   "Managua"
+  ],
+  "Washington, D.C.": [
+   "Washington"
+  ]
+ },
+ "lieux": {
+  "Bande de Gaza": {
+   "noms": [
+    "Gaza",
+    "Gaza Strip"
+   ],
+   "lat": 31.42,
+   "lon": 34.37,
+   "pays": "PSE",
+   "type": "region",
+   "population": 2200000
+  },
+  "Cisjordanie": {
+   "noms": [
+    "West Bank"
+   ],
+   "lat": 31.95,
+   "lon": 35.3,
+   "pays": "PSE",
+   "type": "region",
+   "population": 3000000
+  },
+  "Donbass": {
+   "noms": [
+    "Donbas"
+   ],
+   "lat": 48.3,
+   "lon": 38.0,
+   "pays": "UKR",
+   "type": "region",
+   "population": 6000000
+  },
+  "Crimée": {
+   "noms": [
+    "Crimea",
+    "Crimee"
+   ],
+   "lat": 45.3,
+   "lon": 34.4,
+   "pays": "UKR",
+   "type": "region",
+   "population": 2400000
+  },
+  "Sahel": {
+   "noms": [],
+   "lat": 15.0,
+   "lon": 1.0,
+   "pays": null,
+   "type": "region",
+   "population": 0
+  },
+  "Haut-Karabagh": {
+   "noms": [
+    "Nagorno-Karabakh",
+    "Karabakh"
+   ],
+   "lat": 39.82,
+   "lon": 46.75,
+   "pays": "AZE",
+   "type": "region",
+   "population": 120000
+  }
+ }
+}

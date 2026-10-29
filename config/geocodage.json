@@ -1,0 +1,8 @@
+{
+  "_commentaire": "Service de géocodage pour les lieux que la base locale (donnees/gazetteer.json.gz, 12 600 pays et villes) ne connaît pas. Désactivé par défaut : la base locale suffit à la plupart des dépêches, ne demande aucun réseau et n'a aucune limite de débit.\n\nPour l'activer, mettre actif à true et choisir un service :\n  photon    – https://photon.komoot.io, ou votre propre instance. Pas de clé.\n  nominatim – https://nominatim.openstreetmap.org. Conditions strictes : user_agent\n              identifiant avec une adresse de contact, 1 requête/seconde au plus,\n              et cache obligatoire. Le cache est de toute façon appliqué ici.\n\nSur un serveur dédié, auto-héberger Photon lève la limite de débit : mettre alors l'adresse de votre instance et monter debit_par_seconde.\n\nTout lieu cherché est mémorisé dans la table lieux_geocodes, succès comme échec : un même nom n'est jamais demandé deux fois.",
+  "actif": false,
+  "service": "photon",
+  "url": "https://photon.komoot.io",
+  "user_agent": "MAP-EAE-veille/1.1 (projet pluridisciplinaire EAE ; contact : a-changer@example.org)",
+  "debit_par_seconde": 1
+}
